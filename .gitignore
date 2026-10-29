@@ -1,0 +1,67 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Jupyter
+.ipynb_checkpoints
+*/.ipynb_checkpoints/*
+
+# Pytest & Coverage
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Local databases & artifacts
+*.duckdb
+*.duckdb.wal
+*.db
+*.sqlite
+*.sqlite3
+
+# Environment & credentials
+.env
+.env.local
+*.pem
+*.key
+
+# Raw & sensitive data (keep directories tracked with .gitkeep)
+data/raw/*
+!data/raw/.gitkeep
+data/staging/*
+!data/staging/.gitkeep
+data/clean/*
+!data/clean/.gitkeep
+data/golden/*
+!data/golden/.gitkeep
+data/features/*
+!data/features/.gitkeep
+outputs/*
+!outputs/.gitkeep
+!outputs/README.md
+
+# OS / Editor
+.DS_Store
+.vscode/
+.idea/
+test_executed.ipynb

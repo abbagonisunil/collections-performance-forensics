@@ -1,0 +1,82 @@
+graph TB
+    subgraph Raw_Layer ["1. Immutable Raw Sources (17 Systems)"]
+        R1["Borrowers & Accounts Master"]
+        R2["Dialer Calls & Dispositions"]
+        R3["Omnichannel (WhatsApp, SMS, Field)"]
+        R4["Payments & Gateway Webhooks"]
+        R5["Vendor Telephony & CDRs"]
+        R6["Promises to Pay (PTP) & Complaints"]
+    end
+
+    subgraph Ingestion_Stage ["2. Ingestion & Schema Discovery"]
+        ING["IngestionEngine (CSV, Parquet, JSON)"]
+        PRO["SourceProfiler & Metadata Discovery"]
+    end
+
+    subgraph Staging_Layer ["3. Staging Layer (DuckDB Views)"]
+        STG["stg_borrowers, stg_accounts, stg_payments, stg_calls..."]
+    end
+
+    subgraph Clean_Layer ["4. Clean & Forensic Audit Layer"]
+        DEDUP["DeduplicationEngine<br/>(10m Replay & Exact UTR Check)"]
+        RESOLVE["EntityResolver<br/>(Agent Aliases & Vendor Codes)"]
+        NORM["TimestampNormalizer<br/>(UTC + IST Calling Windows)"]
+        QUAR["dq_issue_log<br/>(Anomalies & Exclusions)"]
+    end
+
+    subgraph Golden_Layer ["5. Golden Analytical Layer (Lakehouse)"]
+        DIM["Dimensions:<br/>dim_borrower, dim_account, dim_agent, dim_campaign"]
+        FACT["Facts:<br/>fact_payment (Canonical), fact_interaction, fact_ptp, fact_account_month"]
+    end
+
+    subgraph Attribution_Layer ["6. Causal Attribution Bridge"]
+        ATTR["AttributionEngine<br/>(Last-Touch, First-Touch, Multi-Touch, Time-Decay)"]
+    end
+
+    subgraph Feature_Layer ["7. Feature Engineering Store"]
+        FEAT["features_account_level<br/>(Delinquency, Propensity, Targeting Pre/Post)"]
+    end
+
+    subgraph Analytics_Layer ["8. Advanced Analytics & Modeling"]
+        STAT["StatisticalInvestigator<br/>(Kitagawa Mix Decomposition, Simpson's Paradox)"]
+        CF["CounterfactualAnalyzer<br/>(Difference-in-Differences, ATT Lift)"]
+        INV["InvestmentModel<br/>(₹10 Cr Capital Allocation, 6 Scenarios)"]
+    end
+
+    subgraph Verification_Layer ["9. Reconciliation & Circuit Breakers"]
+        REC["MetricsEngine.run_reconciliation()<br/>(Monetary Balance & Anti-Fanout Checks)"]
+    end
+
+    subgraph Dashboard_Layer ["10. Executive Decision Support"]
+        DASH["Streamlit Executive Dashboard<br/>(60-Second CEO Comprehension, Claim Verdict, KPI Row)"]
+        MEMO["2-Page Executive Memorandum"]
+    end
+
+    Raw_Layer --> ING
+    ING --> STG
+    STG --> PRO
+    STG --> DEDUP
+    STG --> RESOLVE
+    STG --> NORM
+    DEDUP --> QUAR
+    DEDUP --> Golden_Layer
+    RESOLVE --> Golden_Layer
+    NORM --> Golden_Layer
+    Golden_Layer --> ATTR
+    Golden_Layer --> FEAT
+    ATTR --> FEAT
+    FEAT --> STAT
+    FEAT --> CF
+    STAT --> Analytics_Layer
+    CF --> Analytics_Layer
+    Analytics_Layer --> INV
+    Analytics_Layer --> REC
+    REC --> Verification_Layer
+    Verification_Layer --> DASH
+    Verification_Layer --> MEMO
+
+    style Raw_Layer fill:#f8fafc,stroke:#94a3b8,stroke-width:1px
+    style Golden_Layer fill:#f0fdf4,stroke:#22c55e,stroke-width:2px
+    style Clean_Layer fill:#fef3c7,stroke:#f59e0b,stroke-width:2px
+    style Analytics_Layer fill:#eff6ff,stroke:#3b82f6,stroke-width:2px
+    style Dashboard_Layer fill:#fdf2f8,stroke:#ec4899,stroke-width:2px

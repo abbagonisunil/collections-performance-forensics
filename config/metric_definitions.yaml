@@ -1,0 +1,105 @@
+# Collections Performance Forensics - Versioned Metric Dictionary
+
+version: "2.1.0"
+status: "PRODUCTION_AUDITED"
+description: "Mathematically rigorous, defensible definitions of collection metrics challenging legacy reporting"
+
+metrics:
+  contact_rate:
+    id: "METRIC_01"
+    name: "Account Contact Rate"
+    legacy_definition: "Connected calls / total call attempts (telephony connection rate, ignoring customer identity)"
+    defensible_definition: "Unique accounts with at least one human interaction / unique eligible delinquent accounts targeted in the period"
+    numerator: "COUNT(DISTINCT c.account_id) WHERE c.duration_seconds >= 15 AND d.disposition_category IN ('RPC', 'WPC')"
+    denominator: "COUNT(DISTINCT t.account_id) WHERE t.is_suppressed = FALSE"
+    grain: "Account-Month"
+    limitations: "Telephony connection does not equal human communication; must exclude IVR dropoffs and wrong numbers."
+    reconciliation_check: "Numerator <= Denominator; Dispositions must match completed call IDs."
+
+  rpc_rate:
+    id: "METRIC_02"
+    name: "Right-Party Contact (RPC) Rate"
+    legacy_definition: "Calls tagged as RPC by agent / Total connected calls"
+    defensible_definition: "Unique delinquent accounts where borrower identity was verified / Unique accounts contacted"
+    numerator: "COUNT(DISTINCT c.account_id) WHERE d.disposition_category = 'RPC' AND d.sub_disposition != 'IDENTITY_UNCONFIRMED'"
+    denominator: "COUNT(DISTINCT c.account_id) WHERE c.duration_seconds >= 15"
+    grain: "Account-Month"
+    limitations: "Prone to vendor disposition code remapping or agent misclassification to inflate targets."
+    reconciliation_check: "RPC accounts <= Contacted accounts <= Targeted accounts."
+
+  ptp_rate:
+    id: "METRIC_03"
+    name: "Promise-to-Pay (PTP) Conversion Rate"
+    legacy_definition: "Total PTP count / total completed calls (double counts accounts giving multiple broken promises)"
+    defensible_definition: "Unique accounts securing a valid, future-dated repayment commitment / Unique RPC accounts"
+    numerator: "COUNT(DISTINCT p.account_id) WHERE p.promised_due_date >= CAST(p.ptp_created_time AS DATE) AND p.promised_amount > 0"
+    denominator: "COUNT(DISTINCT c.account_id) WHERE d.disposition_category = 'RPC'"
+    grain: "Account-Month"
+    limitations: "Agents may record non-binding promises to meet shift quotas."
+    reconciliation_check: "PTP accounts <= RPC accounts."
+
+  ptp_kept_rate:
+    id: "METRIC_04"
+    name: "PTP Kept Rate (Maturity Adjusted)"
+    legacy_definition: "Payments received / Total promises (ignores due date timing, attributes future payments to past broken promises)"
+    defensible_definition: "Matured promises where successful realized payment was received within due date + grace window (3 days) / Total matured promises"
+    numerator: "COUNT(DISTINCT p.ptp_id) WHERE pay.payment_status = 'SUCCESS' AND pay.payment_timestamp BETWEEN p.ptp_created_time AND (p.promised_due_date + INTERVAL 3 DAYS)"
+    denominator: "COUNT(DISTINCT p.ptp_id) WHERE p.promised_due_date <= (CURRENT_DATE - INTERVAL 3 DAYS)"
+    grain: "Promise Cohort / Monthly Maturity"
+    limitations: "Immature recent promises must be censored, not marked broken."
+    reconciliation_check: "Kept PTP count <= Matured PTP count."
+
+  recovery_rate:
+    id: "METRIC_05"
+    name: "Cohort Recovery Rate (Primary Benchmark)"
+    legacy_definition: "Total cash collected in month M / Total cash collected in month M-1 (Volume growth mistaken for efficiency)"
+    defensible_definition: "Realized canonical cash collected / Opening eligible delinquent exposure for the defined monthly cohort"
+    numerator: "SUM(p.amount_paid) WHERE p.payment_status = 'SUCCESS' AND p.is_duplicate = FALSE"
+    denominator: "SUM(a.opening_principal) WHERE a.status IN ('ACTIVE', 'DELINQUENT') AND a.dpd > 0"
+    grain: "Portfolio-Month / Cohort-Month"
+    limitations: "Must use static opening exposure; using closing or dynamic exposure distorts the denominator as accounts settle."
+    reconciliation_check: "Canonical collections = Gross collections - Duplicates - Reversals/Refunds."
+
+  recovery_per_account:
+    id: "METRIC_06"
+    name: "Realized Recovery Per Eligible Account"
+    legacy_definition: "Total collections / Count of accounts that made a payment (Survivorship bias)"
+    defensible_definition: "Realized canonical collections / Total eligible portfolio accounts at month start"
+    numerator: "SUM(p.amount_paid) WHERE p.payment_status = 'SUCCESS' AND p.is_duplicate = FALSE"
+    denominator: "COUNT(DISTINCT a.account_id) WHERE a.dpd > 0"
+    grain: "Account-Month"
+    limitations: "Varies substantially by loan ticket size and DPD bucket."
+    reconciliation_check: "Equals Recovery Rate * Average Opening Balance."
+
+  recovery_per_agent_hour:
+    id: "METRIC_07"
+    name: "Recovery Per Productive Agent-Hour"
+    legacy_definition: "Total collections / (Agent count * 8 hours * 22 days) (Scheduled shift assumption ignores attendance and shrinkage)"
+    defensible_definition: "Eligible collections attributed to calling / De-duplicated productive agent hours (Talk Time + Wrap-Up Time)"
+    numerator: "SUM(p.amount_paid) WHERE p.attributed_channel IN ('Human_Call', 'Predictive_Dialer')"
+    denominator: "SUM(s.talk_duration_sec + s.wrap_up_duration_sec) / 3600.0"
+    grain: "Agent-Month"
+    limitations: "Requires clean session deduplication; idle dialer time and pause states excluded."
+    reconciliation_check: "Productive hours <= Total logged-in hours <= Total calendar hours."
+
+  cost_per_rupee_recovered:
+    id: "METRIC_08"
+    name: "Cost per Rupee Recovered"
+    legacy_definition: "Estimated vendor bills / Reported gross collections"
+    defensible_definition: "Total fully-loaded direct operating collections cost / Total realized canonical collections"
+    numerator: "SUM(agent_costs + telephony_costs + digital_vendor_costs + field_costs)"
+    denominator: "SUM(p.amount_paid) WHERE p.payment_status = 'SUCCESS' AND p.is_duplicate = FALSE"
+    grain: "Portfolio-Month"
+    limitations: "Shared corporate overheads excluded; direct operational variable costs only."
+    reconciliation_check: "Cost per rupee < 1.0 for viable operations."
+
+  mom_relative_vs_percentage_point:
+    id: "METRIC_09"
+    name: "MoM Recovery Rate Growth"
+    legacy_definition: "Ambiguous: 'Recovery improved 11%' (Could mean rate went from 10% to 11.1% or from 10% to 21% or volume grew 11%)"
+    defensible_definition: "Explicitly report both: 1) Relative MoM % = (Rate_M - Rate_M_minus_1) / Rate_M_minus_1 * 100, and 2) Absolute p.p. = Rate_M - Rate_M_minus_1"
+    numerator: "Recovery_Rate(Month M) - Recovery_Rate(Month M-1)"
+    denominator: "Recovery_Rate(Month M-1)"
+    grain: "Month-over-Month"
+    limitations: "Small baseline rates cause exaggerated relative percentage swings."
+    reconciliation_check: "Must document whether claim is volume, relative rate, or percentage point."

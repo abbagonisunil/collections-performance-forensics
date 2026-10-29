@@ -1,0 +1,353 @@
+# Collections Performance Forensics - Source Inventory & Data Contract Specifications
+
+version: "1.0.0"
+description: "Specification of 17 source datasets covering ~12 months of collections operations"
+
+sources:
+  borrowers:
+    description: "Borrower master profile and demographics"
+    grain: "1 row per borrower"
+    primary_key: ["borrower_id"]
+    foreign_keys: {}
+    timestamp_fields:
+      created_at: "Profile creation timestamp"
+      updated_at: "Profile last modified timestamp"
+    columns:
+      borrower_id: "VARCHAR"
+      external_borrower_id: "VARCHAR"
+      full_name: "VARCHAR"
+      phone_hash: "VARCHAR"
+      state: "VARCHAR"
+      city: "VARCHAR"
+      pin_code: "VARCHAR"
+      risk_tier: "VARCHAR" # Tier_A, Tier_B, Tier_C
+      preferred_language: "VARCHAR" # Hindi, English, Tamil, Telugu, Marathi, Kannada, Bengali
+      annual_income: "DOUBLE"
+      credit_score: "INTEGER"
+      created_at: "TIMESTAMP"
+      updated_at: "TIMESTAMP"
+    reliability: "High (Master Record)"
+
+  accounts:
+    description: "Loan account records, balances, and delinquency bucket"
+    grain: "1 row per account"
+    primary_key: ["account_id"]
+    foreign_keys:
+      borrower_id: "borrowers.borrower_id"
+    timestamp_fields:
+      disbursed_at: "Loan origination date"
+      due_date: "Monthly installment due date"
+    columns:
+      account_id: "VARCHAR"
+      borrower_id: "VARCHAR"
+      client_name: "VARCHAR" # FinTech_A, Bank_B, NBFC_C
+      product_type: "VARCHAR" # Personal_Loan, Credit_Line, Two_Wheeler
+      disbursed_amount: "DOUBLE"
+      opening_principal: "DOUBLE"
+      current_outstanding: "DOUBLE"
+      dpd: "INTEGER" # Days Past Due
+      dpd_bucket: "VARCHAR" # 1-30, 31-60, 61-90, 91-120, 120+
+      status: "VARCHAR" # ACTIVE, CLOSED, WRITTEN_OFF, SETTLED
+      disbursed_at: "TIMESTAMP"
+      due_date: "TIMESTAMP"
+    reliability: "High (Core Banking / LMS)"
+
+  agents:
+    description: "Collections agent roster and identity metadata"
+    grain: "1 row per agent"
+    primary_key: ["agent_id"]
+    foreign_keys: {}
+    timestamp_fields:
+      hire_date: "Agent onboarding date"
+      exit_date: "Agent termination date"
+    columns:
+      agent_id: "VARCHAR"
+      login_username: "VARCHAR"
+      agent_name: "VARCHAR"
+      team_lead_id: "VARCHAR"
+      center_location: "VARCHAR" # Bengaluru, Mumbai, Delhi, Remote
+      primary_language: "VARCHAR"
+      tenure_months: "INTEGER"
+      agent_tier: "VARCHAR" # Trainee, Junior, Senior, Specialist
+      hire_date: "DATE"
+      exit_date: "DATE"
+      is_active: "BOOLEAN"
+    reliability: "Medium (Prone to alias logins / duplicate IDs across centers)"
+
+  agent_sessions:
+    description: "Dialer login, logout, and productive session tracking"
+    grain: "1 row per agent session"
+    primary_key: ["session_id"]
+    foreign_keys:
+      agent_id: "agents.agent_id"
+    timestamp_fields:
+      login_time: "Dialer login timestamp"
+      logout_time: "Dialer logout timestamp"
+    columns:
+      session_id: "VARCHAR"
+      agent_id: "VARCHAR"
+      login_time: "TIMESTAMP"
+      logout_time: "TIMESTAMP"
+      total_duration_sec: "INTEGER"
+      talk_duration_sec: "INTEGER"
+      wrap_up_duration_sec: "INTEGER"
+      idle_duration_sec: "INTEGER"
+      break_duration_sec: "INTEGER"
+    reliability: "Medium (Prone to missing logouts or overlapping sessions)"
+
+  campaigns:
+    description: "Targeted collections campaigns and operating guidelines"
+    grain: "1 row per campaign"
+    primary_key: ["campaign_id"]
+    foreign_keys: {}
+    timestamp_fields:
+      start_date: "Campaign start timestamp"
+      end_date: "Campaign end timestamp"
+    columns:
+      campaign_id: "VARCHAR"
+      campaign_name: "VARCHAR"
+      strategy_type: "VARCHAR" # Champion, Challenger, AI_Assisted, Digital_First
+      target_bucket: "VARCHAR" # DPD 1-30, DPD 31-60, etc.
+      primary_channel: "VARCHAR" # Predictive_Dialer, Progressive, WhatsApp, SMS
+      start_date: "DATE"
+      end_date: "DATE"
+      status: "VARCHAR"
+    reliability: "High (Campaign Configuration)"
+
+  daily_targeting:
+    description: "Daily account allocations to channels and strategies"
+    grain: "1 row per account-day"
+    primary_key: ["targeting_id"]
+    foreign_keys:
+      account_id: "accounts.account_id"
+      campaign_id: "campaigns.campaign_id"
+    timestamp_fields:
+      target_date: "Calendar date of assignment"
+    columns:
+      targeting_id: "VARCHAR"
+      target_date: "DATE"
+      account_id: "VARCHAR"
+      campaign_id: "VARCHAR"
+      assigned_channel: "VARCHAR"
+      propensity_score: "DOUBLE" # 0.0 to 1.0
+      priority_rank: "INTEGER"
+      is_suppressed: "BOOLEAN"
+    reliability: "High (Targeting Engine)"
+
+  calls:
+    description: "Call records initiated across human and dialer systems"
+    grain: "1 row per call"
+    primary_key: ["call_id"]
+    foreign_keys:
+      account_id: "accounts.account_id"
+      agent_id: "agents.agent_id"
+      campaign_id: "campaigns.campaign_id"
+    timestamp_fields:
+      call_start_time: "Call initiation timestamp"
+      call_end_time: "Call disconnect timestamp"
+    columns:
+      call_id: "VARCHAR"
+      account_id: "VARCHAR"
+      agent_id: "VARCHAR"
+      campaign_id: "VARCHAR"
+      call_start_time: "TIMESTAMP"
+      call_end_time: "TIMESTAMP"
+      duration_seconds: "INTEGER"
+      call_type: "VARCHAR" # Outbound_Predictive, Outbound_Manual, Inbound
+      vendor_id: "VARCHAR" # Vendor_X, Vendor_Y
+      status: "VARCHAR" # COMPLETED, ABANDONED, FAILED
+    reliability: "High (Dialer CDR)"
+
+  call_attempts:
+    description: "Granular dial attempts per call sequence"
+    grain: "1 row per attempt"
+    primary_key: ["attempt_id"]
+    foreign_keys:
+      call_id: "calls.call_id"
+      account_id: "accounts.account_id"
+    timestamp_fields:
+      attempt_time: "Dial timestamp"
+    columns:
+      attempt_id: "VARCHAR"
+      call_id: "VARCHAR"
+      account_id: "VARCHAR"
+      attempt_number: "INTEGER"
+      attempt_time: "TIMESTAMP"
+      telephony_status: "VARCHAR" # RINGING, BUSY, NO_ANSWER, CONNECTED
+    reliability: "Medium (Vendor dependent)"
+
+  call_dispositions:
+    description: "Outcome codes and disposition categorizations logged by agents/dialers"
+    grain: "1 row per disposition"
+    primary_key: ["disposition_id"]
+    foreign_keys:
+      call_id: "calls.call_id"
+    timestamp_fields:
+      disposition_time: "Logging timestamp"
+    columns:
+      disposition_id: "VARCHAR"
+      call_id: "VARCHAR"
+      disposition_code: "VARCHAR" # Raw code: RPC_PTP, RPC_CB, WPC, NOANS, DNC
+      disposition_category: "VARCHAR" # Standardized: RPC, Non_RPC, Unreached
+      sub_disposition: "VARCHAR"
+      disposition_time: "TIMESTAMP"
+      agent_notes: "VARCHAR"
+    reliability: "Medium (Prone to code revisions and schema shifts)"
+
+  whatsapp_events:
+    description: "Digital engagement events via WhatsApp Business API"
+    grain: "1 row per event"
+    primary_key: ["event_id"]
+    foreign_keys:
+      account_id: "accounts.account_id"
+    timestamp_fields:
+      event_timestamp: "Status change timestamp"
+    columns:
+      event_id: "VARCHAR"
+      account_id: "VARCHAR"
+      template_id: "VARCHAR"
+      event_type: "VARCHAR" # SENT, DELIVERED, READ, BUTTON_CLICK, INBOUND_REPLY
+      event_timestamp: "TIMESTAMP"
+      cta_clicked: "VARCHAR" # Pay_Now, Request_PTP, Dispute
+    reliability: "High (API Webhook)"
+
+  sms_events:
+    description: "Outbound SMS events and delivery receipts"
+    grain: "1 row per event"
+    primary_key: ["event_id"]
+    foreign_keys:
+      account_id: "accounts.account_id"
+    timestamp_fields:
+      event_timestamp: "Carrier timestamp"
+    columns:
+      event_id: "VARCHAR"
+      account_id: "VARCHAR"
+      campaign_id: "VARCHAR"
+      event_type: "VARCHAR" # SENT, DELIVERED, FAILED, LINK_CLICKED
+      event_timestamp: "TIMESTAMP"
+      link_url: "VARCHAR"
+    reliability: "High (Carrier DLR)"
+
+  field_visits:
+    description: "Physical collections officer visits to borrower premises"
+    grain: "1 row per field visit"
+    primary_key: ["visit_id"]
+    foreign_keys:
+      account_id: "accounts.account_id"
+    timestamp_fields:
+      visit_timestamp: "Check-in timestamp"
+    columns:
+      visit_id: "VARCHAR"
+      account_id: "VARCHAR"
+      officer_id: "VARCHAR"
+      visit_timestamp: "TIMESTAMP"
+      latitude: "DOUBLE"
+      longitude: "DOUBLE"
+      outcome: "VARCHAR" # MET_BORROWER, PREMISES_LOCKED, WRONG_ADDRESS, PTP_OBTAINED
+      cash_collected: "DOUBLE"
+      receipt_number: "VARCHAR"
+    reliability: "Medium (Manual mobile logging)"
+
+  promises_to_pay:
+    description: "Explicit commitments to repay by a target date"
+    grain: "1 row per promise"
+    primary_key: ["ptp_id"]
+    foreign_keys:
+      account_id: "accounts.account_id"
+      call_id: "calls.call_id"
+    timestamp_fields:
+      ptp_created_time: "Commitment logging timestamp"
+      promised_due_date: "Maturity date of commitment"
+    columns:
+      ptp_id: "VARCHAR"
+      account_id: "VARCHAR"
+      call_id: "VARCHAR"
+      agent_id: "VARCHAR"
+      channel_origin: "VARCHAR" # Call, WhatsApp, Field, Self_Serve
+      ptp_created_time: "TIMESTAMP"
+      promised_due_date: "DATE"
+      promised_amount: "DOUBLE"
+      status: "VARCHAR" # KEPT, BROKEN, PENDING, CANCELLED
+    reliability: "High (Auditable promise record)"
+
+  payments:
+    description: "Realized cash recovery transactions and settlement records"
+    grain: "1 row per transaction"
+    primary_key: ["payment_id"]
+    foreign_keys:
+      account_id: "accounts.account_id"
+    timestamp_fields:
+      payment_timestamp: "Transaction initiation timestamp"
+      settlement_timestamp: "Bank settlement timestamp"
+    columns:
+      payment_id: "VARCHAR"
+      transaction_reference: "VARCHAR" # Bank UTR / Gateway ID
+      account_id: "VARCHAR"
+      amount_paid: "DOUBLE"
+      principal_component: "DOUBLE"
+      interest_component: "DOUBLE"
+      fee_component: "DOUBLE"
+      payment_method: "VARCHAR" # UPI, NetBanking, DebitCard, Cash, NACH
+      payment_status: "VARCHAR" # SUCCESS, FAILED, REVERSED, REFUNDED
+      payment_timestamp: "TIMESTAMP"
+      settlement_timestamp: "TIMESTAMP"
+    reliability: "High (Financial Ledger, but subject to duplicate webhook retries)"
+
+  vendor_telephony:
+    description: "Third-party telephony gateway diagnostic logs"
+    grain: "1 row per gateway event"
+    primary_key: ["cdr_id"]
+    foreign_keys:
+      call_id: "calls.call_id"
+    timestamp_fields:
+      event_time: "Carrier timestamp"
+    columns:
+      cdr_id: "VARCHAR"
+      call_id: "VARCHAR"
+      carrier_name: "VARCHAR" # Airtel, Jio, VI
+      sip_response_code: "INTEGER" # 200, 486, 487, 503
+      sip_reason: "VARCHAR"
+      latency_ms: "INTEGER"
+      event_time: "TIMESTAMP"
+    reliability: "High (Carrier logs)"
+
+  complaints:
+    description: "Customer grievance and regulatory escalation records"
+    grain: "1 row per complaint"
+    primary_key: ["complaint_id"]
+    foreign_keys:
+      account_id: "accounts.account_id"
+    timestamp_fields:
+      logged_at: "Grievance filing timestamp"
+      resolved_at: "Grievance closure timestamp"
+    columns:
+      complaint_id: "VARCHAR"
+      account_id: "VARCHAR"
+      channel_reported: "VARCHAR" # RBI_CMS, Ombudsman, Inbound_Call, Email
+      category: "VARCHAR" # Calling_Hours_Violation, Harassment, Incorrect_Data, Language
+      severity: "VARCHAR" # Low, Medium, High, Critical
+      logged_at: "TIMESTAMP"
+      resolved_at: "TIMESTAMP"
+      status: "VARCHAR" # OPEN, RESOLVED, ESCALATED
+    reliability: "High (Compliance Audit Trail)"
+
+  account_status_history:
+    description: "Slowly changing account status, DPD movements, and closures"
+    grain: "1 row per status change event"
+    primary_key: ["status_event_id"]
+    foreign_keys:
+      account_id: "accounts.account_id"
+    timestamp_fields:
+      effective_from: "State start timestamp"
+      effective_to: "State expiry timestamp"
+    columns:
+      status_event_id: "VARCHAR"
+      account_id: "VARCHAR"
+      effective_from: "TIMESTAMP"
+      effective_to: "TIMESTAMP"
+      old_status: "VARCHAR"
+      new_status: "VARCHAR" # Active, Delinquent, NPA, Written_Off, Settled, Closed
+      old_dpd: "INTEGER"
+      new_dpd: "INTEGER"
+      reason: "VARCHAR"
+    reliability: "High (SCD Type 2 Core Record)"

@@ -1,0 +1,71 @@
+# Collections Performance Forensics - Global Configuration
+
+project:
+  name: "collections-performance-forensics"
+  version: "1.0.0"
+  description: "Independent forensic reconstruction of collections performance and ₹10 Cr capital allocation analysis"
+
+paths:
+  raw_data_dir: "data/raw"
+  staging_dir: "data/staging"
+  clean_dir: "data/clean"
+  golden_dir: "data/golden"
+  features_dir: "data/features"
+  duckdb_database: "data/golden/collections_forensics.duckdb"
+  outputs_dir: "outputs"
+  reports_dir: "reports"
+  sql_dir: "sql"
+
+timezones:
+  canonical_storage: "UTC"
+  business_local: "Asia/Kolkata"
+  calling_hours_start: 8    # 08:00 AM local
+  calling_hours_end: 19     # 07:00 PM local
+
+forensic_rules:
+  deduplication:
+    payment_duplicate_window_seconds: 600   # 10 minutes for replay detection
+    check_exact_duplicates: true
+    check_event_replay: true
+    exclude_failed_transactions: true
+    reversal_statuses: ["FAILED", "REVERSED", "REFUNDED", "CHARGEBACK"]
+  
+  attribution:
+    default_window_days: 14
+    sensitivity_windows_days: [7, 14, 30]
+    supported_models:
+      - "last_touch"
+      - "first_touch"
+      - "linear_multi_touch"
+      - "time_decay"
+    decay_half_life_days: 3.5
+
+  counterfactual:
+    midyear_shift_date: "2024-07-01"
+    pre_period_months: 6
+    post_period_months: 6
+    methodology: "difference_in_differences"
+    alternative_methodology: "propensity_score_weighting"
+
+investment:
+  capital_budget_inr: 100000000  # ₹10 Crore
+  horizon_months: 12
+  options:
+    - id: "telephony_infra"
+      name: "Better Telephony Infrastructure"
+      focus: "Carrier routes, CLI rotation, connect-rate optimization"
+    - id: "more_agents"
+      name: "More Collection Agents"
+      focus: "Human capacity expansion, dialer seat scaling"
+    - id: "ai_voice"
+      name: "AI Voice Automation"
+      focus: "Agentic conversational bots for early-bucket outreach"
+    - id: "better_targeting"
+      name: "Better Borrower Targeting"
+      focus: "Propensity scoring, timing optimization, segmentation"
+    - id: "whatsapp_digital"
+      name: "WhatsApp / Digital Engagement"
+      focus: "Omnichannel payment links, conversational messaging"
+    - id: "field_operations"
+      name: "Field Operations"
+      focus: "Physical feet-on-street, late-bucket door visits"
