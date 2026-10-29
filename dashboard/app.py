@@ -197,7 +197,7 @@ with col_left:
         x=months, y=canonical_rate, mode='lines+markers', name='Audited Canonical Recovery Rate (%)',
         line=dict(color='#0284c7', width=3)
     ))
-    fig_trend.add_vline(x="Month 6", line_width=1, line_dash="dash", line_color="#64748b", annotation_text="Mid-Year Targeting Strategy Shift")
+    fig_trend.add_vline(x=5, line_width=1, line_dash="dash", line_color="#64748b", annotation_text="Mid-Year Targeting Shift", annotation_position="top left")
     fig_trend.update_layout(
         height=320,
         margin=dict(l=10, r=10, t=10, b=10),
