@@ -30,7 +30,7 @@ test:
 	$(PYTHON) -m pytest -v tests/
 
 notebook-check:
-	jupyter nbconvert --to notebook --execute notebooks/01_collections_performance_investigation.ipynb --output test_executed.ipynb && rm -f test_executed.ipynb
+	jupyter nbconvert --to notebook --execute notebooks/01_collections_performance_investigation.ipynb --output test_executed.ipynb && rm -f notebooks/test_executed.ipynb test_executed.ipynb
 
 dashboard:
 	streamlit run dashboard/app.py
@@ -40,4 +40,4 @@ all: profile pipeline test notebook-check
 
 clean:
 	rm -rf .pytest_cache __pycache__ src/__pycache__ tests/__pycache__
-	rm -f data/golden/*.duckdb.wal test_executed.ipynb
+	rm -f data/golden/*.duckdb.wal notebooks/test_executed.ipynb test_executed.ipynb

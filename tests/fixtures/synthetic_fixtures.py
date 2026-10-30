@@ -61,7 +61,7 @@ SYNTHETIC_PAYMENTS_DATA = [
         "payment_method": "NETBANKING",
         "payment_status": "SUCCESS",
         "payment_timestamp": "2024-04-12 14:03:00",
-        "settlement_timestamp": "2024-04-12 14:08:00"
+        "settlement_timestamp": None # Unsettled webhook retry event
     },
     {
         "payment_id": "PAY_005", # FAILED TRANSACTION
@@ -88,6 +88,19 @@ SYNTHETIC_PAYMENTS_DATA = [
         "payment_status": "SUCCESS",
         "payment_timestamp": "2024-05-15 11:20:00",
         "settlement_timestamp": "2024-05-15 11:25:00"
+    },
+    {
+        "payment_id": "PAY_007", # LEGITIMATE REPEAT INSTALLMENT: same account, same amount, 4 mins later WITH distinct settled UTR
+        "transaction_reference": "UTR_LEGIT_106",
+        "account_id": "ACC_1001",
+        "amount_paid": 5000.0,
+        "principal_component": 4000.0,
+        "interest_component": 800.0,
+        "fee_component": 200.0,
+        "payment_method": "UPI",
+        "payment_status": "SUCCESS",
+        "payment_timestamp": "2024-03-10 10:20:00",
+        "settlement_timestamp": "2024-03-10 10:20:30"
     }
 ]
 

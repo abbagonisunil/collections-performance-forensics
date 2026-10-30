@@ -209,7 +209,7 @@ SELECT
     UPPER(TRIM(payment_method)) AS payment_method,
     UPPER(TRIM(payment_status)) AS payment_status,
     CAST(payment_timestamp AS TIMESTAMP) AS payment_timestamp,
-    CAST(COALESCE(settlement_timestamp, payment_timestamp) AS TIMESTAMP) AS settlement_timestamp
+    CAST(settlement_timestamp AS TIMESTAMP) AS settlement_timestamp
 FROM raw_payments;
 
 -- Staging 15: Vendor Telephony (Carrier Logs)

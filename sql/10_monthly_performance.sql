@@ -70,15 +70,30 @@ ORDER BY reporting_month;
 
 -- Forensic Verdict on the "11% Month-on-Month" Claim
 CREATE OR REPLACE VIEW v_audit_verdict_11_pct_claim AS
+WITH audit_summary AS (
+    SELECT 
+        COUNT(*) AS evaluated_months_count,
+        ROUND(AVG(naive_mom_recovery_growth_pct), 2) AS avg_reported_naive_mom_growth_pct,
+        ROUND(AVG(canonical_mom_recovery_growth_pct), 2) AS avg_audited_canonical_mom_growth_pct,
+        ROUND(AVG(naive_mom_recovery_growth_pct) - AVG(canonical_mom_recovery_growth_pct), 2) AS growth_rate_distortion_pct,
+        ROUND(SUM(monthly_overstatement_inr), 2) AS cumulative_recovery_overstatement_inr,
+        ROUND(SUM(canonical_recovered_inr), 2) AS total_canonical_recovered_inr,
+        ROUND(SUM(naive_gross_collections_inr), 2) AS total_naive_gross_collections_inr
+    FROM monthly_performance_audit
+    WHERE month_index > 1
+)
 SELECT 
-    AVG(naive_mom_recovery_growth_pct) AS avg_reported_naive_mom_growth_pct,
-    AVG(canonical_mom_recovery_growth_pct) AS avg_audited_canonical_mom_growth_pct,
-    ROUND(AVG(naive_mom_recovery_growth_pct) - AVG(canonical_mom_recovery_growth_pct), 2) AS growth_rate_distortion_pct,
-    SUM(monthly_overstatement_inr) AS cumulative_recovery_overstatement_inr,
+    evaluated_months_count,
+    avg_reported_naive_mom_growth_pct,
+    avg_audited_canonical_mom_growth_pct,
+    growth_rate_distortion_pct,
+    cumulative_recovery_overstatement_inr,
+    total_canonical_recovered_inr,
+    total_naive_gross_collections_inr,
     CASE 
-        WHEN AVG(canonical_mom_recovery_growth_pct) >= 10.5 THEN 'SUPPORTED_REAL'
-        WHEN AVG(naive_mom_recovery_growth_pct) >= 10.0 AND AVG(canonical_mom_recovery_growth_pct) < 6.0 THEN 'DISPROVEN_ARTIFICIAL_INFLATION'
+        WHEN evaluated_months_count IS NULL OR evaluated_months_count = 0 THEN 'AWAITING_RAW_COLLECTIONS_DATA'
+        WHEN avg_audited_canonical_mom_growth_pct >= 10.5 THEN 'SUPPORTED_REAL'
+        WHEN avg_reported_naive_mom_growth_pct >= 10.0 AND avg_audited_canonical_mom_growth_pct < 6.0 THEN 'DISPROVEN_ARTIFICIAL_INFLATION'
         ELSE 'AMBIGUOUS_UNVERIFIED'
     END AS forensic_verdict
-FROM monthly_performance_audit
-WHERE month_index > 1;
+FROM audit_summary;

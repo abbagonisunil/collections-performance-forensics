@@ -7,14 +7,14 @@
 CREATE OR REPLACE VIEW v_reconciliation_monetary_trail AS
 WITH raw_total AS (
     SELECT 
-        '1. RAW_PAYMENTS' AS stage,
+        '1. RAW_PAYMENTS_INGESTED' AS stage,
         COUNT(*) AS transaction_count,
         ROUND(SUM(COALESCE(amount_paid, 0.0)), 2) AS total_collections_inr
     FROM stg_payments
 ),
 clean_total AS (
     SELECT 
-        '2. CLEAN_DEDUPLICATED' AS stage,
+        '2. CLEAN_CANONICAL_SETTLED' AS stage,
         COUNT(*) AS transaction_count,
         ROUND(SUM(COALESCE(amount_paid, 0.0)), 2) AS total_collections_inr
     FROM clean_payments
@@ -28,29 +28,39 @@ golden_total AS (
 ),
 attribution_total AS (
     SELECT 
-        '4. ATTRIBUTED_BRIDGE_LAST_TOUCH' AS stage,
+        '4. ATTRIBUTED_OUTREACH_CASH' AS stage,
         COUNT(DISTINCT payment_id) AS transaction_count,
         ROUND(SUM(COALESCE(attributed_inr_last_touch, 0.0)), 2) AS total_collections_inr
     FROM fact_payment_attribution
+),
+unattributed_total AS (
+    SELECT 
+        '5. ORGANIC_UNATTRIBUTED_CASH' AS stage,
+        COUNT(DISTINCT p.payment_id) AS transaction_count,
+        ROUND(SUM(COALESCE(p.amount_paid, 0.0)), 2) AS total_collections_inr
+    FROM fact_payment p
+    LEFT JOIN (SELECT DISTINCT payment_id FROM fact_payment_attribution) a ON p.payment_id = a.payment_id
+    WHERE a.payment_id IS NULL
 )
 SELECT * FROM raw_total
 UNION ALL SELECT * FROM clean_total
 UNION ALL SELECT * FROM golden_total
-UNION ALL SELECT * FROM attribution_total;
+UNION ALL SELECT * FROM attribution_total
+UNION ALL SELECT * FROM unattributed_total;
 
 -- 2. Forensic Deduplication Ledger Balance Check
 CREATE OR REPLACE VIEW v_reconciliation_dedup_balance AS
 SELECT 
     ROUND(SUM(amount_paid), 2) AS gross_raw_collections,
-    ROUND(SUM(CASE WHEN dedup_decision = 'RETAINED_CANONICAL' THEN amount_paid ELSE 0 END), 2) AS canonical_cash,
-    ROUND(SUM(CASE WHEN dedup_decision = 'EXCLUDED_WEBHOOK_REPLAY_RETRY' THEN amount_paid ELSE 0 END), 2) AS excluded_webhook_replays,
+    ROUND(SUM(CASE WHEN dedup_decision IN ('RETAINED_CANONICAL', 'RETAINED_DISTINCT_REFERENCE') THEN amount_paid ELSE 0 END), 2) AS canonical_cash,
+    ROUND(SUM(CASE WHEN dedup_decision IN ('EXCLUDED_WEBHOOK_REPLAY_RETRY', 'FLAGGED_CANDIDATE_RETRY_UNRESOLVED') THEN amount_paid ELSE 0 END), 2) AS excluded_webhook_replays,
     ROUND(SUM(CASE WHEN dedup_decision = 'EXCLUDED_EXACT_REF_DUPLICATE' THEN amount_paid ELSE 0 END), 2) AS excluded_exact_duplicates,
     ROUND(SUM(CASE WHEN dedup_decision = 'EXCLUDED_REVERSAL_OR_FAILED' THEN amount_paid ELSE 0 END), 2) AS excluded_reversals,
     ROUND(SUM(CASE WHEN dedup_decision = 'EXCLUDED_INVALID_AMOUNT' THEN amount_paid ELSE 0 END), 2) AS excluded_invalid_amounts,
     -- Audit Balance Check: Gross - (Canonical + Exclusions) must equal 0.00
     ROUND(SUM(amount_paid) - (
-        SUM(CASE WHEN dedup_decision = 'RETAINED_CANONICAL' THEN amount_paid ELSE 0 END) +
-        SUM(CASE WHEN dedup_decision = 'EXCLUDED_WEBHOOK_REPLAY_RETRY' THEN amount_paid ELSE 0 END) +
+        SUM(CASE WHEN dedup_decision IN ('RETAINED_CANONICAL', 'RETAINED_DISTINCT_REFERENCE') THEN amount_paid ELSE 0 END) +
+        SUM(CASE WHEN dedup_decision IN ('EXCLUDED_WEBHOOK_REPLAY_RETRY', 'FLAGGED_CANDIDATE_RETRY_UNRESOLVED') THEN amount_paid ELSE 0 END) +
         SUM(CASE WHEN dedup_decision = 'EXCLUDED_EXACT_REF_DUPLICATE' THEN amount_paid ELSE 0 END) +
         SUM(CASE WHEN dedup_decision = 'EXCLUDED_REVERSAL_OR_FAILED' THEN amount_paid ELSE 0 END) +
         SUM(CASE WHEN dedup_decision = 'EXCLUDED_INVALID_AMOUNT' THEN amount_paid ELSE 0 END)

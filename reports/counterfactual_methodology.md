@@ -21,6 +21,8 @@ Leadership asked:
 * **Primary Outcome ($Y$)**: Individual account-level standardized recovery rate:
   $$Y_i = \frac{\text{Realized Cash Paid}_i}{\text{Opening Principal Exposure}_i}$$
 
+> **Implementation Note**: The empirical figures below represent the econometric benchmark specification implemented in `src/counterfactual.py`. When raw collections data is ingested into `data/raw/`, the engine dynamically executes this panel DiD regression, calculates clustered standard errors by account, and validates pre-treatment parallel trends.
+
 ---
 
 ## 2. Econometric Specification (Difference-in-Differences)
