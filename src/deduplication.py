@@ -16,9 +16,12 @@ class DeduplicationEngine:
     def run_deduplication(self) -> pd.DataFrame:
         """Executes deduplication logic and populates payment_deduplication_log."""
         sql_path = settings.sql_dir / "04_deduplication.sql"
-        if sql_path.exists():
-            with open(sql_path, "r", encoding="utf-8") as f:
-                self.con.execute(f.read())
+        try:
+            if sql_path.exists():
+                with open(sql_path, "r", encoding="utf-8") as f:
+                    self.con.execute(f.read())
+        except Exception as e:
+            logger.debug(f"Could not execute deduplication DDL (e.g. read-only connection): {e}")
         
         try:
             return self.con.execute("SELECT * FROM v_payment_deduplication_audit;").fetchdf()

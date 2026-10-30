@@ -53,3 +53,35 @@ def test_staged_pilot_financial_specifications():
     assert pilot["net_benefit_cr"] == 0.10
     assert pilot["roi_pct"] == 5.0
     assert pilot["pilot_break_even_months"] < 6.0
+
+
+def test_cash_flow_payback_calculation():
+    """Verifies that payback is derived from cumulative monthly net cash flows, not naive ratio division."""
+    # Test case: Capex = 3.5 Cr, Annual Opex = 6.5 Cr, Gross Recovery = 4.0 Cr (Base scenario)
+    # Since monthly recovery (0.36 Cr) < monthly opex (0.54 Cr), it never breaks even
+    cf_loss = InvestmentModel.calculate_cash_flows(
+        capex_inr=35_000_000,
+        annual_opex_inr=65_000_000,
+        annual_gross_recovery_inr=40_000_000,
+        ramp_up_months=2,
+        horizon_months=12
+    )
+    assert cf_loss["annual_net_benefit_inr"] == -60_000_000.0  # -₹6.0 Cr
+    assert cf_loss["roi_pct"] == -60.0
+    assert cf_loss["payback_months"] is None
+    assert cf_loss["payback_str"] == "> 12 Months (No Year-1 Payback)"
+
+    # Test case: Target scenario (Gross Recovery = 12.75 Cr)
+    cf_target = InvestmentModel.calculate_cash_flows(
+        capex_inr=35_000_000,
+        annual_opex_inr=65_000_000,
+        annual_gross_recovery_inr=127_500_000,
+        ramp_up_months=2,
+        horizon_months=12
+    )
+    assert cf_target["annual_net_benefit_inr"] == 27_500_000.0  # +₹2.75 Cr
+    assert cf_target["roi_pct"] == 27.5
+    assert cf_target["payback_months"] is not None
+    assert 7.0 <= cf_target["payback_months"] <= 8.5
+
+

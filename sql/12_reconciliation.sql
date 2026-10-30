@@ -52,18 +52,20 @@ UNION ALL SELECT * FROM unattributed_total;
 CREATE OR REPLACE VIEW v_reconciliation_dedup_balance AS
 SELECT 
     ROUND(SUM(amount_paid), 2) AS gross_raw_collections,
-    ROUND(SUM(CASE WHEN dedup_decision IN ('RETAINED_CANONICAL', 'RETAINED_DISTINCT_REFERENCE') THEN amount_paid ELSE 0 END), 2) AS canonical_cash,
-    ROUND(SUM(CASE WHEN dedup_decision IN ('EXCLUDED_WEBHOOK_REPLAY_RETRY', 'FLAGGED_CANDIDATE_RETRY_UNRESOLVED') THEN amount_paid ELSE 0 END), 2) AS excluded_webhook_replays,
-    ROUND(SUM(CASE WHEN dedup_decision = 'EXCLUDED_EXACT_REF_DUPLICATE' THEN amount_paid ELSE 0 END), 2) AS excluded_exact_duplicates,
-    ROUND(SUM(CASE WHEN dedup_decision = 'EXCLUDED_REVERSAL_OR_FAILED' THEN amount_paid ELSE 0 END), 2) AS excluded_reversals,
-    ROUND(SUM(CASE WHEN dedup_decision = 'EXCLUDED_INVALID_AMOUNT' THEN amount_paid ELSE 0 END), 2) AS excluded_invalid_amounts,
+    ROUND(SUM(CASE WHEN dedup_decision = 'RETAINED_CANONICAL' THEN amount_paid ELSE 0 END), 2) AS canonical_cash,
+    ROUND(SUM(CASE WHEN dedup_decision = 'EXCLUDED_EXACT_DUPLICATE' THEN amount_paid ELSE 0 END), 2) AS excluded_exact_duplicates,
+    ROUND(SUM(CASE WHEN dedup_decision = 'EXCLUDED_FAILED' THEN amount_paid ELSE 0 END), 2) AS excluded_failed_transactions,
+    ROUND(SUM(CASE WHEN dedup_decision = 'EXCLUDED_REVERSED' THEN amount_paid ELSE 0 END), 2) AS excluded_reversals_refunds,
+    ROUND(SUM(CASE WHEN dedup_decision = 'FLAGGED_UNRESOLVED' THEN amount_paid ELSE 0 END), 2) AS flagged_unresolved_retries,
+    ROUND(SUM(CASE WHEN dedup_decision = 'OTHER_DOCUMENTED_DECISIONS' THEN amount_paid ELSE 0 END), 2) AS other_documented_exclusions,
     -- Audit Balance Check: Gross - (Canonical + Exclusions) must equal 0.00
     ROUND(SUM(amount_paid) - (
-        SUM(CASE WHEN dedup_decision IN ('RETAINED_CANONICAL', 'RETAINED_DISTINCT_REFERENCE') THEN amount_paid ELSE 0 END) +
-        SUM(CASE WHEN dedup_decision IN ('EXCLUDED_WEBHOOK_REPLAY_RETRY', 'FLAGGED_CANDIDATE_RETRY_UNRESOLVED') THEN amount_paid ELSE 0 END) +
-        SUM(CASE WHEN dedup_decision = 'EXCLUDED_EXACT_REF_DUPLICATE' THEN amount_paid ELSE 0 END) +
-        SUM(CASE WHEN dedup_decision = 'EXCLUDED_REVERSAL_OR_FAILED' THEN amount_paid ELSE 0 END) +
-        SUM(CASE WHEN dedup_decision = 'EXCLUDED_INVALID_AMOUNT' THEN amount_paid ELSE 0 END)
+        SUM(CASE WHEN dedup_decision = 'RETAINED_CANONICAL' THEN amount_paid ELSE 0 END) +
+        SUM(CASE WHEN dedup_decision = 'EXCLUDED_EXACT_DUPLICATE' THEN amount_paid ELSE 0 END) +
+        SUM(CASE WHEN dedup_decision = 'EXCLUDED_FAILED' THEN amount_paid ELSE 0 END) +
+        SUM(CASE WHEN dedup_decision = 'EXCLUDED_REVERSED' THEN amount_paid ELSE 0 END) +
+        SUM(CASE WHEN dedup_decision = 'FLAGGED_UNRESOLVED' THEN amount_paid ELSE 0 END) +
+        SUM(CASE WHEN dedup_decision = 'OTHER_DOCUMENTED_DECISIONS' THEN amount_paid ELSE 0 END)
     ), 4) AS audit_discrepancy_inr
 FROM payment_deduplication_log;
 

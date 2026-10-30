@@ -16,8 +16,11 @@ class MetricsEngine:
 
     def calculate_metrics(self) -> pd.DataFrame:
         """Executes metric calculation views."""
-        execute_sql_file(self.con, self.sql_dir / "09_metrics.sql")
-        execute_sql_file(self.con, self.sql_dir / "10_monthly_performance.sql")
+        try:
+            execute_sql_file(self.con, self.sql_dir / "09_metrics.sql")
+            execute_sql_file(self.con, self.sql_dir / "10_monthly_performance.sql")
+        except Exception as e:
+            logger.debug(f"Could not execute metrics DDL on connection: {e}")
         try:
             return self.con.execute("SELECT * FROM monthly_performance_audit ORDER BY month_index;").fetchdf()
         except Exception as e:
@@ -25,31 +28,51 @@ class MetricsEngine:
             return pd.DataFrame()
 
     def evaluate_11_pct_claim(self) -> Dict[str, Any]:
-        """Evaluates whether the '11% month-on-month improvement' claim is verified or disproven."""
+        """Evaluates whether the '11% month-on-month improvement' claim is verified, contradicted, or not verifiable."""
         try:
-            res = self.con.execute("SELECT * FROM v_audit_verdict_11_pct_claim;").fetchone()
-            if res:
+            df = self.con.execute("SELECT * FROM v_audit_verdict_11_pct_claim;").fetchdf()
+            if not df.empty:
+                row = df.iloc[0].to_dict()
                 return {
-                    "avg_reported_naive_mom_growth_pct": float(res[0] or 0.0),
-                    "avg_audited_canonical_mom_growth_pct": float(res[1] or 0.0),
-                    "growth_rate_distortion_pct": float(res[2] or 0.0),
-                    "cumulative_recovery_overstatement_inr": float(res[3] or 0.0),
-                    "forensic_verdict": str(res[4] or "UNVERIFIED")
+                    "evaluated_months_count": int(row.get("evaluated_months_count") or 0),
+                    "period_start": str(row.get("period_start") or "N/A"),
+                    "period_end": str(row.get("period_end") or "N/A"),
+                    "numerator_cash_recovered": float(row.get("numerator_cash_recovered") or 0.0),
+                    "denominator_opening_exposure": float(row.get("denominator_opening_exposure") or 0.0),
+                    "formula": str(row.get("formula") or ""),
+                    "avg_reported_naive_mom_growth_pct": float(row.get("avg_reported_naive_mom_growth_pct") or 0.0),
+                    "avg_audited_canonical_mom_growth_pct": float(row.get("avg_audited_canonical_mom_growth_pct") or 0.0),
+                    "growth_rate_distortion_pct": float(row.get("growth_rate_distortion_pct") or 0.0),
+                    "cumulative_recovery_overstatement_inr": float(row.get("cumulative_recovery_overstatement_inr") or 0.0),
+                    "total_canonical_recovered_inr": float(row.get("total_canonical_recovered_inr") or 0.0),
+                    "forensic_verdict": str(row.get("forensic_verdict") or "NOT_VERIFIABLE"),
+                    "verdict_explanation": str(row.get("verdict_explanation") or "Awaiting raw collections data.")
                 }
         except Exception as e:
             logger.warning(f"Error evaluating 11% claim: {e}")
 
         return {
+            "evaluated_months_count": 0,
+            "period_start": "N/A",
+            "period_end": "N/A",
+            "numerator_cash_recovered": 0.0,
+            "denominator_opening_exposure": 0.0,
+            "formula": "Canonical Rate = Realized Cash / Opening Exposure * 100",
             "avg_reported_naive_mom_growth_pct": 0.0,
             "avg_audited_canonical_mom_growth_pct": 0.0,
             "growth_rate_distortion_pct": 0.0,
             "cumulative_recovery_overstatement_inr": 0.0,
-            "forensic_verdict": "DATA_AWAITING_INGESTION"
+            "total_canonical_recovered_inr": 0.0,
+            "forensic_verdict": "NOT_VERIFIABLE",
+            "verdict_explanation": "The claim cannot currently be verified because required collections data and original reporting definitions are unavailable."
         }
 
     def run_reconciliation(self) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
         """Executes reconciliation checks and invariant tests."""
-        execute_sql_file(self.con, self.sql_dir / "12_reconciliation.sql")
+        try:
+            execute_sql_file(self.con, self.sql_dir / "12_reconciliation.sql")
+        except Exception as e:
+            logger.debug(f"Could not execute reconciliation DDL on connection: {e}")
         try:
             monetary_trail = self.con.execute("SELECT * FROM v_reconciliation_monetary_trail;").fetchdf()
             dedup_balance = self.con.execute("SELECT * FROM v_reconciliation_dedup_balance;").fetchdf()

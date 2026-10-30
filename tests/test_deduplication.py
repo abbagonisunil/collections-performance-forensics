@@ -16,12 +16,12 @@ def test_deduplication_decisions_on_synthetic_fixtures(populated_test_db):
 
     # Assert individual classifications based on synthetic fixture specifications
     assert decisions["PAY_001"] == "RETAINED_CANONICAL"
-    assert decisions["PAY_002"] == "EXCLUDED_EXACT_REF_DUPLICATE"
+    assert decisions["PAY_002"] == "EXCLUDED_EXACT_DUPLICATE"
     assert decisions["PAY_003"] == "RETAINED_CANONICAL"
-    assert decisions["PAY_004"] == "FLAGGED_CANDIDATE_RETRY_UNRESOLVED"
-    assert decisions["PAY_005"] == "EXCLUDED_REVERSAL_OR_FAILED"
+    assert decisions["PAY_004"] == "FLAGGED_UNRESOLVED"
+    assert decisions["PAY_005"] == "EXCLUDED_FAILED"
     assert decisions["PAY_006"] == "RETAINED_CANONICAL"
-    assert decisions["PAY_007"] == "RETAINED_DISTINCT_REFERENCE"
+    assert decisions["PAY_007"] == "RETAINED_CANONICAL"
 
 
 def test_recovery_inflation_calculation(populated_test_db):

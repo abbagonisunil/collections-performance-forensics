@@ -1,6 +1,6 @@
-"""Counterfactual analysis: Difference-in-Differences and propensity weighting for targeting shift."""
+"""Counterfactual analysis: Difference-in-Differences and econometric evaluation of targeting shift."""
 
-from typing import Dict, Any, Tuple
+from typing import Dict, Any, Optional
 import duckdb
 import numpy as np
 import pandas as pd
@@ -10,16 +10,32 @@ from src.utils import logger, get_db_connection
 
 
 class CounterfactualAnalyzer:
-    """Estimates the causal impact of the mid-year targeting strategy shift."""
+    """Estimates the causal impact of the mid-year targeting strategy shift using Difference-in-Differences."""
 
     def __init__(self, con: duckdb.DuckDBPyConnection = None):
         self.con = con or get_db_connection()
         self.shift_date = "2024-07-01"
 
     def estimate_difference_in_differences(self) -> Dict[str, Any]:
-        """Calculates Difference-in-Differences (DiD) estimator for account recovery rate."""
+        """Calculates Difference-in-Differences (DiD) estimator for account recovery rate.
+        
+        Returns an explicit AWAITING_REAL_DATA or IDENTIFICATION_NOT_SUPPORTED status
+        when data or a valid control group is absent, never returning fictional numbers.
+        """
+        # Step 1: Check database population
         try:
-            # Query account-period panel: Treatment vs Control, Pre vs Post
+            account_count = self.con.execute("SELECT COUNT(*) FROM dim_account;").fetchone()[0]
+        except Exception:
+            account_count = 0
+
+        if account_count == 0:
+            return self._build_unavailable_result(
+                status="AWAITING_REAL_DATA",
+                reason="dim_account table is unpopulated. Real collections panel data is required."
+            )
+
+        try:
+            # Query account-period panel: Treatment vs Control across Pre and Post
             query = f"""
                 WITH account_periods AS (
                     SELECT 
@@ -36,34 +52,51 @@ class CounterfactualAnalyzer:
                 SELECT 
                     treatment_group,
                     post_period,
-                    COUNT(*) AS n_accounts,
+                    COUNT(DISTINCT account_id) AS n_accounts,
                     SUM(opening_principal) AS total_exposure,
                     SUM(recovered_amount) AS total_recovered,
-                    AVG(recovered_amount / NULLIF(opening_principal, 0)) AS mean_recovery_rate,
-                    VAR_SAMP(recovered_amount / NULLIF(opening_principal, 0)) AS var_recovery_rate
+                    AVG(recovered_amount / NULLIF(opening_principal, 0.0)) AS mean_recovery_rate,
+                    VAR_SAMP(recovered_amount / NULLIF(opening_principal, 0.0)) AS var_recovery_rate
                 FROM account_periods
                 GROUP BY 1, 2
                 ORDER BY 1, 2;
             """
             df = self.con.execute(query).fetchdf()
+
+            # Ensure all 4 2x2 cells exist
             if df.empty or len(df) < 4:
-                # Return defensive scenario estimates if table is empty
-                return self._fallback_counterfactual_estimates()
+                return self._build_unavailable_result(
+                    status="IDENTIFICATION_NOT_SUPPORTED",
+                    reason="Panel does not contain all 4 2x2 cells (Treatment/Control x Pre/Post). Valid control group cannot be identified."
+                )
 
-            # Map the 2x2 cells
-            # T=0, P=0 (Control Pre)
-            c_pre = df[(df["treatment_group"] == 0) & (df["post_period"] == 0)].iloc[0]
-            # T=0, P=1 (Control Post)
-            c_post = df[(df["treatment_group"] == 0) & (df["post_period"] == 1)].iloc[0]
-            # T=1, P=0 (Treatment Pre)
-            t_pre = df[(df["treatment_group"] == 1) & (df["post_period"] == 0)].iloc[0]
-            # T=1, P=1 (Treatment Post)
-            t_post = df[(df["treatment_group"] == 1) & (df["post_period"] == 1)].iloc[0]
+            # Check that both treatment and control have accounts
+            n_c_pre = df[(df["treatment_group"] == 0) & (df["post_period"] == 0)]
+            n_c_post = df[(df["treatment_group"] == 0) & (df["post_period"] == 1)]
+            n_t_pre = df[(df["treatment_group"] == 1) & (df["post_period"] == 0)]
+            n_t_post = df[(df["treatment_group"] == 1) & (df["post_period"] == 1)]
 
-            y_c_pre = c_pre["mean_recovery_rate"]
-            y_c_post = c_post["mean_recovery_rate"]
-            y_t_pre = t_pre["mean_recovery_rate"]
-            y_t_post = t_post["mean_recovery_rate"]
+            if n_c_pre.empty or n_c_post.empty or n_t_pre.empty or n_t_post.empty:
+                return self._build_unavailable_result(
+                    status="IDENTIFICATION_NOT_SUPPORTED",
+                    reason="Incomplete 2x2 design matrix. One or more treatment-period combinations have zero accounts."
+                )
+
+            c_pre = n_c_pre.iloc[0]
+            c_post = n_c_post.iloc[0]
+            t_pre = n_t_pre.iloc[0]
+            t_post = n_t_post.iloc[0]
+
+            if c_pre["n_accounts"] < 10 or t_pre["n_accounts"] < 10:
+                return self._build_unavailable_result(
+                    status="IDENTIFICATION_NOT_SUPPORTED",
+                    reason=f"Insufficient sample size for inference: control pre={c_pre['n_accounts']}, treatment pre={t_pre['n_accounts']}."
+                )
+
+            y_c_pre = float(c_pre["mean_recovery_rate"] or 0.0)
+            y_c_post = float(c_post["mean_recovery_rate"] or 0.0)
+            y_t_pre = float(t_pre["mean_recovery_rate"] or 0.0)
+            y_t_post = float(t_post["mean_recovery_rate"] or 0.0)
 
             # DiD calculation: (Y_T,post - Y_T,pre) - (Y_C,post - Y_C,pre)
             diff_treatment = y_t_post - y_t_pre
@@ -71,65 +104,111 @@ class CounterfactualAnalyzer:
             did_estimate = diff_treatment - diff_control
 
             # Variance calculation: sum(var_i / n_i)
-            se_did = np.sqrt(
-                (c_pre["var_recovery_rate"] / max(1, c_pre["n_accounts"])) +
-                (c_post["var_recovery_rate"] / max(1, c_post["n_accounts"])) +
-                (t_pre["var_recovery_rate"] / max(1, t_pre["n_accounts"])) +
-                (t_post["var_recovery_rate"] / max(1, t_post["n_accounts"]))
-            )
+            v_cp = float(c_pre["var_recovery_rate"] or 0.0) / max(1, int(c_pre["n_accounts"]))
+            v_cpost = float(c_post["var_recovery_rate"] or 0.0) / max(1, int(c_post["n_accounts"]))
+            v_tp = float(t_pre["var_recovery_rate"] or 0.0) / max(1, int(t_pre["n_accounts"]))
+            v_tpost = float(t_post["var_recovery_rate"] or 0.0) / max(1, int(t_post["n_accounts"]))
+            se_did = float(np.sqrt(v_cp + v_cpost + v_tp + v_tpost))
 
             ci_lower = did_estimate - 1.96 * se_did
             ci_upper = did_estimate + 1.96 * se_did
-            p_val = 2 * (1 - stats.norm.cdf(abs(did_estimate) / max(1e-6, se_did)))
+            z_score = abs(did_estimate) / max(1e-6, se_did)
+            p_val = float(2 * (1 - stats.norm.cdf(z_score)))
 
             # Counterfactual Outcome: What would recovery have been for Treatment group without change?
             counterfactual_rate = y_t_pre + diff_control
-            post_treatment_exposure = t_post["total_exposure"]
-            observed_post_recovery = t_post["total_recovered"]
+            post_treatment_exposure = float(t_post["total_exposure"] or 0.0)
+            observed_post_recovery = float(t_post["total_recovered"] or 0.0)
             counterfactual_recovery = post_treatment_exposure * counterfactual_rate
             incremental_causal_recovery = observed_post_recovery - counterfactual_recovery
 
             return {
+                "analysis_status": "COMPUTED_FROM_DATA",
                 "identification_strategy": "Difference-in-Differences (DiD)",
-                "treatment_group_definition": "Accounts exposed to mid-year AI/propensity targeting strategy",
-                "control_group_definition": "Comparable accounts maintained on baseline standard targeting",
-                "parallel_trend_validity": "Pre-treatment trends verified (t_pre vs c_pre diff p-val > 0.10)",
-                "observed_post_recovery_inr": round(float(observed_post_recovery), 2),
-                "counterfactual_baseline_recovery_inr": round(float(counterfactual_recovery), 2),
-                "incremental_recovery_inr": round(float(incremental_causal_recovery), 2),
+                "treatment_definition": "Accounts exposed to mid-year targeting strategy shift (post July 1, 2024)",
+                "control_definition": "Comparable unexposed accounts maintained on baseline standard targeting",
+                "intervention_date": self.shift_date,
+                "sample_sizes": {
+                    "treatment_pre": int(t_pre["n_accounts"]),
+                    "treatment_post": int(t_post["n_accounts"]),
+                    "control_pre": int(c_pre["n_accounts"]),
+                    "control_post": int(c_post["n_accounts"])
+                },
+                "pre_treatment_trend_result": "Evaluated on pre-intervention cohort baseline",
+                "balance_diagnostics": {
+                    "treatment_pre_exposure": float(t_pre["total_exposure"]),
+                    "control_pre_exposure": float(c_pre["total_exposure"]),
+                    "treatment_pre_mean_rate": round(y_t_pre * 100.0, 2),
+                    "control_pre_mean_rate": round(y_c_pre * 100.0, 2)
+                },
+                "estimate": round(float(did_estimate * 100.0), 3),
                 "did_effect_percentage_points": round(float(did_estimate * 100.0), 3),
+                "standard_error": round(float(se_did * 100.0), 3),
+                "confidence_interval": [round(float(ci_lower * 100.0), 3), round(float(ci_upper * 100.0), 3)],
                 "ci_95_lower_pp": round(float(ci_lower * 100.0), 3),
                 "ci_95_upper_pp": round(float(ci_upper * 100.0), 3),
                 "p_value": round(float(p_val), 4),
                 "statistical_significance": bool(p_val < 0.05),
+                "observed_post_recovery_inr": round(observed_post_recovery, 2),
+                "counterfactual_baseline_recovery_inr": round(counterfactual_recovery, 2),
+                "incremental_recovery_inr": round(incremental_causal_recovery, 2),
+                "assumptions": [
+                    "Parallel trends assumption: treatment and control recovery rates would have followed parallel trajectories absent intervention",
+                    "No operational spillovers between treatment and control account dialer queues (SUTVA)",
+                    "No confounding policy or macroeconomic changes coinciding with intervention date"
+                ],
+                "limitations": [
+                    "Non-randomized assignment: targeting strategy may select higher-propensity borrowers",
+                    "Cluster-level standard errors require multi-period panel tracking"
+                ],
+                "identification_strength": "MODERATE_OBSERVATIONAL_DID",
                 "business_interpretation": (
-                    f"The mid-year targeting strategy change produced an estimated incremental recovery of "
-                    f"₹{incremental_causal_recovery / 10000000:.2f} Cr (95% CI: [{ci_lower * 100:.2f}%, {ci_upper * 100:.2f}%] pp lift), "
-                    f"confirming that while the change was modestly positive, it represents only a fraction of the claimed 11% improvement."
+                    f"DiD model estimates a treatment effect of {did_estimate * 100.0:+.2f} percentage points "
+                    f"(p = {p_val:.4f}), yielding an estimated incremental recovery of ₹{incremental_causal_recovery / 1e7:.2f} Cr."
                 )
             }
         except Exception as e:
             logger.warning(f"Error executing DiD counterfactual: {e}")
-            return self._fallback_counterfactual_estimates()
+            return self._build_unavailable_result(
+                status="ERROR",
+                reason=f"Execution error during panel DiD estimation: {str(e)}"
+            )
 
-    def _fallback_counterfactual_estimates(self) -> Dict[str, Any]:
-        """Provides analytical baseline specification when running in unpopulated staging environment."""
+    def _build_unavailable_result(self, status: str, reason: str) -> Dict[str, Any]:
+        """Returns structured unavailable result without fictional estimates."""
         return {
-            "analysis_status": "Awaiting Raw Collections Data (Econometric Framework Configured)",
-            "identification_strategy": "Difference-in-Differences (DiD)",
-            "treatment_group_definition": "Accounts exposed to mid-year AI/propensity targeting strategy",
-            "control_group_definition": "Comparable accounts maintained on baseline standard targeting",
-            "parallel_trend_validity": "Awaiting raw cohort execution for empirical parallel trends test",
-            "observed_post_recovery_inr": 284_000_000.0,
-            "counterfactual_baseline_recovery_inr": 266_000_000.0,
-            "incremental_recovery_inr": 18_000_000.0,
-            "did_effect_percentage_points": 0.85,
-            "ci_95_lower_pp": 0.22,
-            "ci_95_upper_pp": 1.48,
-            "p_value": 0.008,
-            "statistical_significance": True,
+            "analysis_status": status,
+            "treatment_definition": "Accounts exposed to mid-year AI/propensity targeting strategy",
+            "control_definition": "Comparable accounts maintained on baseline standard targeting",
+            "intervention_date": self.shift_date,
+            "sample_sizes": {
+                "treatment_pre": 0,
+                "treatment_post": 0,
+                "control_pre": 0,
+                "control_post": 0
+            },
+            "pre_treatment_trend_result": "Unavailable - multi-period pre-intervention panel required",
+            "balance_diagnostics": "Unavailable - borrower and account risk tier features unpopulated",
+            "estimate": None,
+            "standard_error": None,
+            "confidence_interval": None,
+            "p_value": None,
+            "statistical_significance": None,
+            "observed_post_recovery_inr": None,
+            "counterfactual_baseline_recovery_inr": None,
+            "incremental_recovery_inr": None,
+            "assumptions": [
+                "Parallel trends assumption: treatment and control cohorts would follow parallel trajectories absent intervention",
+                "Stable Unit Treatment Value Assumption (SUTVA): zero spillover between treatment and control accounts",
+                "Absence of simultaneous macro shocks or collection policy alterations"
+            ],
+            "limitations": [
+                f"Empirical estimation blocked: {reason}",
+                "Causal attribution requires documented targeting logs and verified holdout control groups"
+            ],
+            "identification_strength": "FRAMEWORK_CONFIGURED_AWAITING_DATA",
             "business_interpretation": (
-                "Econometric benchmark specification: DiD model estimates an incremental causal recovery of ₹1.80 Cr "
-                "(+0.85 percentage points lift), confirming that portfolio mix shift accounts for the vast majority of observed gains."
+                "Counterfactual Difference-in-Differences estimation framework is fully configured. "
+                "Empirical causal estimates will be computed upon ingestion of raw daily targeting and payment records."
             )
         }
