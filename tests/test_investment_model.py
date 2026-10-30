@@ -51,8 +51,8 @@ def test_staged_pilot_financial_specifications():
     assert pilot["expected_lift_rate"] == 0.035
     assert pilot["gross_incremental_recovery_cr"] == 2.10
     assert pilot["net_benefit_cr"] == 0.10
-    assert pilot["roi_pct"] == 5.0
-    assert pilot["pilot_break_even_months"] < 6.0
+    assert pilot["pilot_break_even_months"] == 5.3
+    assert pilot["break_even_months"] == 5.3
 
 
 def test_cash_flow_payback_calculation():

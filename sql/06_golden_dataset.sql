@@ -210,6 +210,11 @@ monthly_interactions AS (
         MAX(CASE WHEN is_rpc THEN 1 ELSE 0 END) AS had_rpc_contact
     FROM fact_interaction
     GROUP BY 1, 2
+),
+account_month_spine AS (
+    SELECT account_id, payment_month AS snapshot_month FROM monthly_payments
+    UNION
+    SELECT account_id, interaction_month AS snapshot_month FROM monthly_interactions
 )
 SELECT 
     a.account_id,
@@ -220,7 +225,7 @@ SELECT
     a.borrower_language,
     a.borrower_risk_tier,
     a.dpd_bucket,
-    COALESCE(mp.payment_month, mi.interaction_month, DATE_TRUNC('month', CURRENT_DATE)) AS snapshot_month,
+    COALESCE(s.snapshot_month, DATE_TRUNC('month', CURRENT_DATE)) AS snapshot_month,
     a.opening_principal,
     COALESCE(mp.monthly_recovered_amount, 0.0) AS monthly_recovered_amount,
     COALESCE(mp.payment_transactions_count, 0) AS payment_transactions_count,
@@ -235,5 +240,6 @@ SELECT
         ELSE FALSE 
     END AS is_paying_account
 FROM dim_account a
-LEFT JOIN monthly_payments mp ON a.account_id = mp.account_id
-LEFT JOIN monthly_interactions mi ON a.account_id = mi.account_id;
+LEFT JOIN account_month_spine s ON a.account_id = s.account_id
+LEFT JOIN monthly_payments mp ON a.account_id = mp.account_id AND s.snapshot_month = mp.payment_month
+LEFT JOIN monthly_interactions mi ON a.account_id = mi.account_id AND s.snapshot_month = mi.interaction_month;

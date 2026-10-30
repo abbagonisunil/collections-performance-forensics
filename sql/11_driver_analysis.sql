@@ -63,33 +63,58 @@ FROM features_account_level
 GROUP BY 1
 ORDER BY 3 DESC;
 
--- Dimension 6 & 7: Agent & Agent Tenure
+-- Dimension 6 & 7: Agent & Agent Tenure (Using Canonical Attribution Bridge - Zero Fanout)
 CREATE OR REPLACE VIEW v_driver_06_07_agent_tenure AS
+WITH unique_agent_attributions AS (
+    -- At most 1 primary call interaction per payment using canonical last-touch attribution
+    SELECT 
+        agent_id,
+        SUM(amount_paid) AS total_attributed_recovery_inr
+    FROM bridge_payment_interaction
+    WHERE last_touch_rank = 1 AND channel = 'CALL' AND agent_id IS NOT NULL
+    GROUP BY agent_id
+)
 SELECT 
     ag.tenure_bucket,
     COUNT(DISTINCT c.agent_id) AS active_agent_count,
     COUNT(DISTINCT c.call_id) AS calls_handled,
     COUNT(DISTINCT CASE WHEN c.disposition_category = 'RPC' THEN c.call_id END) AS rpc_calls,
     ROUND(100.0 * COUNT(DISTINCT CASE WHEN c.disposition_category = 'RPC' THEN c.call_id END) / NULLIF(COUNT(DISTINCT c.call_id), 0), 2) AS rpc_rate_pct,
-    ROUND(SUM(COALESCE(p.amount_paid, 0.0)), 2) AS attributed_recovery_inr
-FROM clean_calls c
-JOIN dim_agent ag ON c.agent_id = ag.agent_id
-LEFT JOIN fact_payment p ON c.account_id = p.account_id AND p.payment_timestamp >= c.call_start_time AND p.payment_timestamp <= (c.call_start_time + INTERVAL 14 DAY)
+    ROUND(SUM(COALESCE(u.total_attributed_recovery_inr, 0.0)), 2) AS attributed_recovery_inr
+FROM dim_agent ag
+LEFT JOIN clean_calls c ON ag.agent_id = c.agent_id
+LEFT JOIN unique_agent_attributions u ON ag.agent_id = u.agent_id
 GROUP BY 1
 ORDER BY 1;
 
--- Dimension 8: Campaign
+-- Dimension 8: Campaign (Using Canonical Attribution Bridge - Zero Fanout)
 CREATE OR REPLACE VIEW v_driver_08_campaign AS
+WITH unique_campaign_attributions AS (
+    -- At most 1 primary campaign interaction per payment using canonical last-touch attribution
+    SELECT 
+        campaign_id,
+        SUM(amount_paid) AS total_attributed_recovery_inr
+    FROM bridge_payment_interaction
+    WHERE last_touch_rank = 1 AND campaign_id IS NOT NULL
+    GROUP BY campaign_id
+),
+campaign_calls AS (
+    SELECT 
+        campaign_id,
+        COUNT(DISTINCT account_id) AS accounts_targeted,
+        COUNT(DISTINCT call_id) AS calls_made
+    FROM clean_calls
+    GROUP BY campaign_id
+)
 SELECT 
     COALESCE(cmp.campaign_name, 'UNMAPPED_CAMPAIGN') AS campaign_name,
     COALESCE(cmp.strategy_type, 'STANDARD') AS strategy_type,
-    COUNT(DISTINCT c.account_id) AS accounts_targeted,
-    COUNT(DISTINCT c.call_id) AS calls_made,
-    ROUND(SUM(COALESCE(p.amount_paid, 0.0)), 2) AS attributed_collections_inr
-FROM clean_calls c
-LEFT JOIN dim_campaign cmp ON c.campaign_id = cmp.campaign_id
-LEFT JOIN fact_payment p ON c.account_id = p.account_id AND p.payment_timestamp >= c.call_start_time AND p.payment_timestamp <= (c.call_start_time + INTERVAL 14 DAY)
-GROUP BY 1, 2
+    COALESCE(cc.accounts_targeted, 0) AS accounts_targeted,
+    COALESCE(cc.calls_made, 0) AS calls_made,
+    ROUND(COALESCE(u.total_attributed_recovery_inr, 0.0), 2) AS attributed_collections_inr
+FROM dim_campaign cmp
+LEFT JOIN campaign_calls cc ON cmp.campaign_id = cc.campaign_id
+LEFT JOIN unique_campaign_attributions u ON cmp.campaign_id = u.campaign_id
 ORDER BY 5 DESC;
 
 -- Dimension 9: Channel Conversion
@@ -167,3 +192,46 @@ SELECT
 FROM features_account_level
 GROUP BY 1
 ORDER BY 1;
+
+-- ============================================================================
+-- SQL Validation Checks: Duplicate Payment Attribution & Invariant Reconciliations
+-- ============================================================================
+
+-- Validation 1: Anti-Fanout Check (Verifies no payment is multi-counted in unique last-touch attribution)
+CREATE OR REPLACE VIEW v_validation_attribution_anti_fanout AS
+SELECT 
+    payment_id,
+    COUNT(CASE WHEN last_touch_rank = 1 THEN 1 END) AS last_touch_count,
+    SUM(weight_last_touch) AS sum_last_touch_weight
+FROM bridge_payment_interaction
+GROUP BY payment_id
+HAVING COUNT(CASE WHEN last_touch_rank = 1 THEN 1 END) > 1 
+    OR SUM(weight_last_touch) > 1.0001;
+
+-- Validation 2: Payment Attribution Reconciliation Check
+CREATE OR REPLACE VIEW v_validation_attribution_reconciliation AS
+WITH total_payments AS (
+    SELECT 
+        COUNT(DISTINCT payment_id) AS total_payment_count,
+        ROUND(SUM(amount_paid), 2) AS total_canonical_cash_inr
+    FROM fact_payment
+),
+attributed_payments AS (
+    SELECT 
+        COUNT(DISTINCT payment_id) AS attributed_payment_count,
+        ROUND(SUM(amount_paid * weight_last_touch), 2) AS total_attributed_cash_inr
+    FROM bridge_payment_interaction
+    WHERE last_touch_rank = 1
+)
+SELECT 
+    t.total_payment_count,
+    t.total_canonical_cash_inr,
+    COALESCE(a.attributed_payment_count, 0) AS attributed_payment_count,
+    COALESCE(a.total_attributed_cash_inr, 0.0) AS total_attributed_cash_inr,
+    ROUND(t.total_canonical_cash_inr - COALESCE(a.total_attributed_cash_inr, 0.0), 2) AS unattributed_organic_cash_inr,
+    CASE 
+        WHEN COALESCE(a.total_attributed_cash_inr, 0.0) <= t.total_canonical_cash_inr THEN 'PASS: NO ATTRIBUTION INFLATION'
+        ELSE 'FAIL: ATTRIBUTED CASH EXCEEDS TOTAL CANONICAL CASH'
+    END AS reconciliation_status
+FROM total_payments t
+LEFT JOIN attributed_payments a ON 1=1;

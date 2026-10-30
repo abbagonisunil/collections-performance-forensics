@@ -25,7 +25,7 @@ Legacy documentation conflated three incompatible assumptions:
 2. **The 27.5% ROI Condition**: For a ₹10.0 Cr capital expenditure to yield a **+₹2.75 Cr Net Benefit** (**+27.5% ROI**), Gross Incremental Recovery must reach:
    $$\text{Required Gross Cash} = \text{Cost} + \text{Net Benefit} = ₹10.00\text{ Cr} + ₹2.75\text{ Cr} = \mathbf{₹12.75\text{ Cr}}$$
    Across ₹250 Cr addressable exposure, this requires an incremental recovery lift of **5.10%** (510 bps). Under this 5.10% lift, cumulative net cash flow turns positive at **8.5 months**.
-3. **The Prudent Leadership Solution**: To capture the high upside of Option 4 without risking a ₹6.0 Cr Year-1 capital loss, leadership must deploy an immediate **₹2.0 Crore Staged Pilot** (50,000 accounts, ₹60 Cr exposure) that breaks even within **5.7 months** before committing the remaining ₹8.0 Crore.
+3. **The Prudent Leadership Solution**: To capture the high upside of Option 4 without risking a ₹6.0 Cr Year-1 capital loss, leadership must deploy an immediate **₹2.0 Crore Staged Pilot** (50,000 accounts, ₹60 Cr exposure) that breaks even within **5.3 months** before committing the remaining ₹8.0 Crore.
 
 ---
 
@@ -66,7 +66,7 @@ To eliminate unhedged capital risk, we recommend structuring the commitment as a
   ├── Expected Lift Rate: +3.50% on targeted sub-cohort
   ├── Gross Recovery: ₹2.10 Crore
   ├── Net Benefit: +₹0.10 Crore (+5.0% ROI in Month 6)
-  └── Break-even: 5.7 Months
+  └── Break-even: 5.3 Months
             │
             ├── DECISION GATE: Did randomized holdout control (10%) confirm causal lift >= +2.50% (p < 0.05)?
             │
@@ -82,7 +82,7 @@ To eliminate unhedged capital risk, we recommend structuring the commitment as a
 * **Capex**: ₹0.60 Cr setup and model calibration.
 * **Operating Cost**: ₹1.40 Cr over 6 months (₹0.233 Cr/month).
 * **Gross Recovery**: ₹2.10 Cr across active months (Months 2–6).
-* **Payback Period**: 5.7 months from initial pilot launch.
+* **Payback Period**: 5.3 months from initial pilot launch.
 * **Holdout Design**: 10% strictly uncontacted randomized holdout control group ensures that seasonal repayments and macro factors are not misattributed to algorithmic lift.
 
 ---

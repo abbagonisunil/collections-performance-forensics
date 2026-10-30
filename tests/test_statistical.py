@@ -37,9 +37,9 @@ def test_kitagawa_decomposition_mathematical_solver():
     within_effect = res["within_operational_effect_pp"]
     between_effect = res["between_mix_shift_effect_pp"]
 
-    # Invariant: within + between must equal total change exactly
-    assert abs((within_effect + between_effect) - total_change) < 1e-6
+    # Invariant: unrounded identity must hold exactly, rounded outputs within rounding tolerance
     assert res["identity_verified"] is True
+    assert abs((within_effect + between_effect) - total_change) <= 0.002
     assert between_effect > 0, "Shift to high-recovery bucket must produce positive mix effect"
 
 
@@ -59,6 +59,58 @@ def test_arbitrary_kitagawa_identity_randomized():
         within_effect = res["within_operational_effect_pp"]
         between_effect = res["between_mix_shift_effect_pp"]
 
-        # Exact identity check within floating point tolerance
-        assert abs((within_effect + between_effect) - total_change) < 1e-6
+        # Exact unrounded identity verified by solver
         assert res["identity_verified"] is True
+        # Rounded outputs match within rounding tolerance
+        assert abs((within_effect + between_effect) - total_change) <= 0.002
+
+
+def test_multiple_payments_per_account_no_exposure_fanout():
+    """Explicitly verifies that when an account has multiple payment records,
+    opening principal is NOT multiplied / fanned out in statistical queries.
+    """
+    con = duckdb.connect(":memory:")
+    con.execute("""
+        CREATE TABLE dim_account (
+            account_id VARCHAR PRIMARY KEY,
+            dpd_bucket VARCHAR,
+            due_date DATE,
+            opening_principal DOUBLE
+        );
+        CREATE TABLE clean_payments (
+            payment_id VARCHAR PRIMARY KEY,
+            account_id VARCHAR,
+            amount_paid DOUBLE
+        );
+    """)
+
+    # 1 account with ₹50,000 opening exposure in PRE period
+    con.execute("""
+        INSERT INTO dim_account VALUES 
+        ('ACC_1', 'DPD_31_60', '2024-03-15', 50000.0);
+    """)
+
+    # 4 distinct payment installments of ₹5,000 each (Total ₹20,000)
+    con.execute("""
+        INSERT INTO clean_payments VALUES 
+        ('PAY_1', 'ACC_1', 5000.0),
+        ('PAY_2', 'ACC_1', 5000.0),
+        ('PAY_3', 'ACC_1', 5000.0),
+        ('PAY_4', 'ACC_1', 5000.0);
+    """)
+
+    # Also add 1 account in POST period so Simpson's query can evaluate multi-period
+    con.execute("""
+        INSERT INTO dim_account VALUES 
+        ('ACC_2', 'DPD_31_60', '2024-08-15', 60000.0);
+        INSERT INTO clean_payments VALUES 
+        ('PAY_5', 'ACC_2', 15000.0);
+    """)
+
+    investigator = StatisticalInvestigator(con=con)
+    res = investigator.test_simpsons_paradox()
+
+    # Pre-period recovery rate: exactly 20,000 / 50,000 = 40.0%
+    # If fanout occurred, exposure would be 200,000 (4 * 50,000) -> 20,000 / 200,000 = 10.0%
+    assert res["aggregate_pre_rate"] == 40.0, f"Expected 40.0% pre-period rate, got {res['aggregate_pre_rate']}% (fanout detected if 10.0%)"
+    assert res["aggregate_post_rate"] == 25.0, f"Expected 25.0% post-period rate, got {res['aggregate_post_rate']}%"

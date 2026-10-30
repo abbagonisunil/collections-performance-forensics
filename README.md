@@ -1,6 +1,6 @@
 # Collections Performance Forensics: Independent Business Investigation & Capital Allocation
 
-[![CI / Quality Checks](https://img.shields.io/badge/Unit%20Tests-21%2F21%20Passing-brightgreen)]()
+[![CI / Quality Checks](https://img.shields.io/badge/Unit%20Tests-26%2F26%20Passing-brightgreen)]()
 [![DuckDB Version](https://img.shields.io/badge/DuckDB-v1.0+-blue)]()
 [![Python Version](https://img.shields.io/badge/Python-3.11%20%7C%203.12-blue)]()
 [![Implementation Status](https://img.shields.io/badge/Audit%20Status-Framework%20Verified%20%7C%20Awaiting%20Raw%20Data-orange)]()
@@ -205,7 +205,7 @@ Executes all 13 stages end-to-end: Schema Discovery $\rightarrow$ Profiling $\ri
 make test
 # Or: pytest -v tests/
 ```
-Executes all **21 automated tests** verifying schema discovery, deduplication rules, anti-fanout joins, rate bounds, Kitagawa mathematical identity, DiD unavailability/estimation, and financial cash-flow formulas.
+Executes all **26 automated tests** verifying schema discovery, deduplication rules, anti-fanout joins, rate bounds, Kitagawa mathematical identity, DiD unavailability/estimation, and financial cash-flow formulas.
 
 ### Step 5: Validate the Investigation Notebook
 ```bash
@@ -275,7 +275,7 @@ Deploying ₹10.0 Cr upfront in an unvalidated model creates severe downside ris
 * **Stage 1 Commitment**: **₹2.00 Crore** (₹0.60 Cr Setup Capex + ₹1.40 Cr 6-Month Opex).
 * **Target Cohort**: 50,000 delinquent accounts in DPD 31–90 (₹60.0 Cr addressable exposure).
 * **Expected Pilot Recovery**: **₹2.10 Crore** (+3.5% lift on targeted sub-cohort).
-* **Pilot Net Benefit**: **+₹0.10 Crore** (+5.0% ROI in Month 6; break-even in **5.7 months**).
+* **Pilot Net Benefit**: **+₹0.10 Crore** (+5.0% ROI in Month 6; break-even in **5.3 months**).
 * **Gated Expansion Rule**: Release the remaining **₹8.00 Crore** only if a 90-day randomized holdout A/B test confirms a statistically significant causal lift of $\ge 2.5\%$ ($p < 0.05$).
 
 ---

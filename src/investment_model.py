@@ -357,8 +357,8 @@ class InvestmentModel:
             "expected_net_benefit_cr": 0.10,
             "roi_pct": 5.0,
             "roi_6m_pct": 5.0,
-            "pilot_break_even_months": cf["payback_months"] or 5.7,
-            "break_even_months": cf["payback_months"] or 5.7,
+            "pilot_break_even_months": cf["payback_months"] or 5.3,
+            "break_even_months": cf["payback_months"] or 5.3,
             "holdout_control_pct": 10.0,
             "stage_gate_criteria": (
                 "Do not deploy remaining ₹8.0 Cr unless Month 6 DiD confirms causal lift >= 2.50 pp "

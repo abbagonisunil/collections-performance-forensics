@@ -132,5 +132,5 @@ $$\text{ROI} = \frac{\text{Incremental Net Benefit}}{\text{Total Incremental Cos
 Deploying ₹10 Cr full capital upfront carries excessive downside risk. We recommend an initial **₹2.0 Crore Staged Pilot** for **Option 4: Better Borrower Targeting**:
 - **Phase 1 Commitment**: ₹2.0 Cr (₹0.60 Cr setup Capex + ₹1.40 Cr 6-month Opex).
 - **Target Population**: 50,000 accounts (₹60.0 Cr exposure).
-- **Target Economics**: Expected lift of +3.50% $\implies$ **₹2.10 Cr Gross Recovery**, **+₹0.10 Cr Net Benefit**, breaking even in **5.7 months**.
+- **Target Economics**: Expected lift of +3.50% $\implies$ **₹2.10 Cr Gross Recovery**, **+₹0.10 Cr Net Benefit**, breaking even in **5.3 months**.
 - **Stage-Gate Condition**: Do not release the remaining ₹8.0 Cr unless Month 6 DiD confirms a causal lift $\ge 2.50\text{ pp}$ ($p < 0.05$) and verified collections $\ge ₹2.10\text{ Cr}$.

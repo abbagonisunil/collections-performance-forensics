@@ -34,20 +34,48 @@ class CounterfactualAnalyzer:
                 reason="dim_account table is unpopulated. Real collections panel data is required."
             )
 
+        # Step 2: Check targeting assignment records in daily targeting or account feature store
+        targeting_records = 0
         try:
-            # Query account-period panel: Treatment vs Control across Pre and Post
+            targeting_records = self.con.execute("SELECT COUNT(*) FROM stg_daily_targeting;").fetchone()[0]
+        except Exception:
+            targeting_records = 0
+
+        if targeting_records == 0:
+            # Check if targeting assignment was pre-computed in features_account_level
+            try:
+                feat_variation = self.con.execute(
+                    "SELECT COUNT(DISTINCT targeted_in_post_period) FROM features_account_level;"
+                ).fetchone()[0]
+            except Exception:
+                feat_variation = 0
+
+            if feat_variation < 2:
+                return self._build_unavailable_result(
+                    status="IDENTIFICATION_NOT_SUPPORTED",
+                    reason="Daily targeting history (stg_daily_targeting) is unpopulated or lacks treatment variation. Exposure records are required to identify treatment and control cohorts."
+                )
+
+        try:
+            # Query account-period panel: Pre-aggregate payments per account to eliminate join fanout
             query = f"""
-                WITH account_periods AS (
+                WITH account_payments AS (
+                    SELECT 
+                        account_id,
+                        SUM(COALESCE(amount_paid, 0.0)) AS total_paid
+                    FROM clean_payments
+                    GROUP BY account_id
+                ),
+                account_periods AS (
                     SELECT 
                         a.account_id,
                         CASE WHEN a.due_date < '{self.shift_date}' THEN 0 ELSE 1 END AS post_period,
                         CASE WHEN COALESCE(tf.targeted_in_post_period, 0) = 1 THEN 1 ELSE 0 END AS treatment_group,
                         a.opening_principal,
-                        COALESCE(SUM(p.amount_paid), 0.0) AS recovered_amount
+                        COALESCE(p.total_paid, 0.0) AS recovered_amount
                     FROM dim_account a
-                    LEFT JOIN clean_payments p ON a.account_id = p.account_id
+                    LEFT JOIN account_payments p ON a.account_id = p.account_id
                     LEFT JOIN features_account_level tf ON a.account_id = tf.account_id
-                    GROUP BY 1, 2, 3, 4
                 )
                 SELECT 
                     treatment_group,
@@ -98,6 +126,23 @@ class CounterfactualAnalyzer:
             y_t_pre = float(t_pre["mean_recovery_rate"] or 0.0)
             y_t_post = float(t_post["mean_recovery_rate"] or 0.0)
 
+            # Check pre-intervention period count to verify parallel trends feasibility
+            pre_months_query = f"""
+                SELECT COUNT(DISTINCT DATE_TRUNC('month', due_date)) 
+                FROM dim_account 
+                WHERE due_date < '{self.shift_date}';
+            """
+            try:
+                pre_period_months = self.con.execute(pre_months_query).fetchone()[0]
+            except Exception:
+                pre_period_months = 1
+
+            pre_trend_status = (
+                f"Assessed across {pre_period_months} distinct pre-intervention periods."
+                if pre_period_months >= 2
+                else "Single pre-intervention baseline available; formal multi-period parallel pre-trends test requires >= 2 pre-periods."
+            )
+
             # DiD calculation: (Y_T,post - Y_T,pre) - (Y_C,post - Y_C,pre)
             diff_treatment = y_t_post - y_t_pre
             diff_control = y_c_post - y_c_pre
@@ -122,6 +167,11 @@ class CounterfactualAnalyzer:
             counterfactual_recovery = post_treatment_exposure * counterfactual_rate
             incremental_causal_recovery = observed_post_recovery - counterfactual_recovery
 
+            # Covariate balance diagnostics: Normalized difference in pre-period opening exposure
+            exp_t = float(t_pre["total_exposure"]) / max(1, int(t_pre["n_accounts"]))
+            exp_c = float(c_pre["total_exposure"]) / max(1, int(c_pre["n_accounts"]))
+            exposure_norm_diff = abs(exp_t - exp_c) / max(1.0, np.sqrt(0.5 * (exp_t**2 + exp_c**2)))
+
             return {
                 "analysis_status": "COMPUTED_FROM_DATA",
                 "identification_strategy": "Difference-in-Differences (DiD)",
@@ -134,10 +184,12 @@ class CounterfactualAnalyzer:
                     "control_pre": int(c_pre["n_accounts"]),
                     "control_post": int(c_post["n_accounts"])
                 },
-                "pre_treatment_trend_result": "Evaluated on pre-intervention cohort baseline",
+                "pre_treatment_trend_result": pre_trend_status,
                 "balance_diagnostics": {
-                    "treatment_pre_exposure": float(t_pre["total_exposure"]),
-                    "control_pre_exposure": float(c_pre["total_exposure"]),
+                    "treatment_pre_mean_exposure": round(exp_t, 2),
+                    "control_pre_mean_exposure": round(exp_c, 2),
+                    "normalized_difference_exposure": round(exposure_norm_diff, 4),
+                    "covariate_balance_status": "BALANCED" if exposure_norm_diff < 0.25 else "IMBALANCE_DETECTED",
                     "treatment_pre_mean_rate": round(y_t_pre * 100.0, 2),
                     "control_pre_mean_rate": round(y_c_pre * 100.0, 2)
                 },

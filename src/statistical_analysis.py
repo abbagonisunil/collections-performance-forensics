@@ -46,27 +46,38 @@ class StatisticalInvestigator:
         return driver_dfs
 
     def test_simpsons_paradox(self) -> Dict[str, Any]:
-        """Tests whether aggregate recovery rate change contradicts segment-level rate changes."""
+        """Tests whether aggregate recovery rate change contradicts segment-level rate changes.
+        
+        Eliminates join fanout by aggregating payments at account grain before joining accounts.
+        """
         try:
             # Compare Pre (Months 1-6) vs Post (Months 7-12) by DPD bucket
             query = """
-                WITH segment_periods AS (
+                WITH account_payments AS (
                     SELECT 
-                        dpd_bucket,
-                        CASE WHEN due_date < '2024-07-01' THEN 'PRE' ELSE 'POST' END AS period,
-                        SUM(opening_principal) AS exposure,
-                        SUM(COALESCE(p.amount_paid, 0.0)) AS recovered
+                        account_id,
+                        SUM(COALESCE(amount_paid, 0.0)) AS total_paid
+                    FROM clean_payments
+                    GROUP BY account_id
+                ),
+                account_exposure AS (
+                    SELECT 
+                        a.account_id,
+                        a.dpd_bucket,
+                        CASE WHEN a.due_date < '2024-07-01' THEN 'PRE' ELSE 'POST' END AS period,
+                        a.opening_principal,
+                        COALESCE(p.total_paid, 0.0) AS recovered
                     FROM dim_account a
-                    LEFT JOIN clean_payments p ON a.account_id = p.account_id
-                    GROUP BY 1, 2
+                    LEFT JOIN account_payments p ON a.account_id = p.account_id
                 )
                 SELECT 
                     dpd_bucket,
                     period,
-                    exposure,
-                    recovered,
-                    ROUND(100.0 * recovered / NULLIF(exposure, 0), 2) AS recovery_rate_pct
-                FROM segment_periods
+                    SUM(opening_principal) AS exposure,
+                    SUM(recovered) AS recovered,
+                    ROUND(100.0 * SUM(recovered) / NULLIF(SUM(opening_principal), 0), 2) AS recovery_rate_pct
+                FROM account_exposure
+                GROUP BY 1, 2
                 ORDER BY 1, 2;
             """
             df = self.con.execute(query).fetchdf()
@@ -78,15 +89,30 @@ class StatisticalInvestigator:
             post_df = df[df["period"] == "POST"].set_index("dpd_bucket")["recovery_rate_pct"]
             diffs = post_df - pre_df
 
-            # Check aggregate
+            # Check aggregate (zero fanout)
             agg_query = """
+                WITH account_payments AS (
+                    SELECT 
+                        account_id,
+                        SUM(COALESCE(amount_paid, 0.0)) AS total_paid
+                    FROM clean_payments
+                    GROUP BY account_id
+                ),
+                account_exposure AS (
+                    SELECT 
+                        a.account_id,
+                        CASE WHEN a.due_date < '2024-07-01' THEN 'PRE' ELSE 'POST' END AS period,
+                        a.opening_principal,
+                        COALESCE(p.total_paid, 0.0) AS recovered
+                    FROM dim_account a
+                    LEFT JOIN account_payments p ON a.account_id = p.account_id
+                )
                 SELECT 
-                    CASE WHEN due_date < '2024-07-01' THEN 'PRE' ELSE 'POST' END AS period,
+                    period,
                     SUM(opening_principal) AS exposure,
-                    SUM(COALESCE(p.amount_paid, 0.0)) AS recovered,
-                    ROUND(100.0 * SUM(COALESCE(p.amount_paid, 0.0)) / NULLIF(SUM(opening_principal), 0), 2) AS agg_rate_pct
-                FROM dim_account a
-                LEFT JOIN clean_payments p ON a.account_id = p.account_id
+                    SUM(recovered) AS recovered,
+                    ROUND(100.0 * SUM(recovered) / NULLIF(SUM(opening_principal), 0), 2) AS agg_rate_pct
+                FROM account_exposure
                 GROUP BY 1;
             """
             agg_df = self.con.execute(agg_query).fetchdf().set_index("period")
@@ -122,6 +148,8 @@ class StatisticalInvestigator:
         r_bar_k = (r_0k + r_1k) / 2
         Within-Segment Effect = sum(w_bar_k * Delta r_k)
         Between-Segment Mix Effect = sum(r_bar_k * Delta w_k)
+
+        Guarantees zero join fanout by pre-aggregating payments per account before joining exposure.
         """
         try:
             # Check if analytical tables have records
@@ -148,16 +176,33 @@ class StatisticalInvestigator:
                     "message": "Empirical mix decomposition awaiting raw collections source ingestion."
                 }
 
+            # Pre-aggregate payments by account_id to eliminate join fanout
             query = """
-                WITH period_segments AS (
+                WITH account_payments AS (
+                    SELECT 
+                        account_id,
+                        SUM(COALESCE(amount_paid, 0.0)) AS total_paid
+                    FROM clean_payments
+                    GROUP BY account_id
+                ),
+                account_exposure AS (
+                    SELECT 
+                        a.account_id,
+                        a.dpd_bucket,
+                        CASE WHEN a.due_date < '2024-07-01' THEN 'PRE' ELSE 'POST' END AS period,
+                        a.opening_principal,
+                        COALESCE(p.total_paid, 0.0) AS recovered
+                    FROM dim_account a
+                    LEFT JOIN account_payments p ON a.account_id = p.account_id
+                ),
+                period_segments AS (
                     SELECT 
                         dpd_bucket,
-                        CASE WHEN due_date < '2024-07-01' THEN 'PRE' ELSE 'POST' END AS period,
-                        COUNT(DISTINCT a.account_id) AS account_count,
+                        period,
+                        COUNT(DISTINCT account_id) AS account_count,
                         SUM(opening_principal) AS exposure,
-                        SUM(COALESCE(p.amount_paid, 0.0)) AS recovered
-                    FROM dim_account a
-                    LEFT JOIN clean_payments p ON a.account_id = p.account_id
+                        SUM(recovered) AS recovered
+                    FROM account_exposure
                     GROUP BY 1, 2
                 ),
                 period_totals AS (
@@ -259,16 +304,27 @@ class StatisticalInvestigator:
         """Mathematical solver for symmetric Kitagawa shift-share decomposition.
         
         Formula:
+        Delta R_observed = sum(w_1k * r_1k) - sum(w_0k * r_0k)
+        Kitagawa Decomposition:
         Delta R = sum(w_bar_k * Delta r_k) + sum(r_bar_k * Delta w_k)
         where:
         w_bar_k = (w_0k + w_1k) / 2
         r_bar_k = (r_0k + r_1k) / 2
+        
+        Non-tautological verification:
+        Independently computes observed aggregate rate change from w0, r0 and w1, r1,
+        and verifies that (Within Effect + Mix Effect) reconciles to the observed change.
         """
         # Normalize weights if not already normalized
         sum_w0 = np.sum(w0)
         sum_w1 = np.sum(w1)
         w0_norm = w0 / sum_w0 if sum_w0 > 0 else w0
         w1_norm = w1 / sum_w1 if sum_w1 > 0 else w1
+
+        # Independently calculate observed aggregate rates and change
+        observed_pre_rate = float(np.sum(w0_norm * r0) * 100.0)
+        observed_post_rate = float(np.sum(w1_norm * r1) * 100.0)
+        observed_change_pp = observed_post_rate - observed_pre_rate
 
         # Symmetric weights and rates
         w_bar = 0.5 * (w0_norm + w1_norm)
@@ -280,19 +336,25 @@ class StatisticalInvestigator:
         within_effect_pp = float(np.sum(w_bar * delta_r) * 100.0)
         between_effect_pp = float(np.sum(r_bar * delta_w) * 100.0)
 
+        # Independent non-tautological reconciliation verification:
+        # Sum of decomposition effects must independently equal observed_change_pp within numerical tolerance
+        reconciliation_discrepancy = abs((within_effect_pp + between_effect_pp) - observed_change_pp)
+        identity_verified = bool(reconciliation_discrepancy < 1e-4)
+
         within_rounded = round(float(within_effect_pp), 3)
         between_rounded = round(float(between_effect_pp), 3)
-        total_rounded = round(within_rounded + between_rounded, 3)
+        total_observed_rounded = round(float(observed_change_pp), 3)
 
-        pct_driven = round(float(100.0 * abs(between_rounded) / max(1e-9, abs(total_rounded))), 1) if abs(total_rounded) > 1e-9 else 0.0
-        identity_verified = bool(abs((within_rounded + between_rounded) - total_rounded) < 1e-7)
+        pct_driven = round(float(100.0 * abs(between_rounded) / max(1e-9, abs(total_observed_rounded))), 1) if abs(total_observed_rounded) > 1e-9 else 0.0
 
         return {
-            "total_change_pp": total_rounded,
+            "total_change_pp": total_observed_rounded,
             "within_operational_effect_pp": within_rounded,
             "between_mix_shift_effect_pp": between_rounded,
+            "observed_aggregate_change_pp": total_observed_rounded,
             "pct_change_driven_by_mix": pct_driven,
-            "identity_verified": identity_verified
+            "identity_verified": identity_verified,
+            "reconciliation_discrepancy": round(float(reconciliation_discrepancy), 6)
         }
 
     def get_benchmark_mix_decomposition(self) -> Dict[str, Any]:

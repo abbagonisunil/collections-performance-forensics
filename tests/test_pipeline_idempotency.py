@@ -80,3 +80,21 @@ def test_pipeline_transformation_idempotency(in_memory_db):
     cnt2 = con.execute("SELECT COUNT(*) FROM payment_deduplication_log;").fetchone()[0]
 
     assert cnt1 == cnt2 == 1, "Deduplication execution must be strictly idempotent"
+
+
+def test_pipeline_structured_execution_report(in_memory_db):
+    """Verifies that ForensicPipeline returns structured stage statuses and reports AWAITING_REAL_DATA
+    when raw sources are unpopulated without raising exceptions.
+    """
+    from src.pipeline import ForensicPipeline
+    pipeline = ForensicPipeline(con=in_memory_db)
+    report = pipeline.run()
+
+    assert "overall_status" in report
+    assert report["overall_status"] in ["AWAITING_REAL_DATA", "SUCCESS"]
+    assert "stages" in report
+    assert report["stages"]["01_ingestion"]["total_expected"] == 17
+    assert report["stages"]["05_deduplication"]["status"] == "SUCCESS"
+    assert report["stages"]["09_metrics"]["status"] == "SUCCESS"
+    assert report["stages"]["13_reconciliation"]["status"] == "SUCCESS"
+    assert report["verdict_11_pct_claim"] == "NOT_VERIFIABLE"

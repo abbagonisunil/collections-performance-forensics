@@ -68,5 +68,5 @@ We evaluated all six strategic options under strict corporate finance identities
 * **Pilot Outlay**: **₹2.00 Crore** (₹0.60 Cr setup/integration Capex + ₹1.40 Cr 6-month operational Opex).
 * **Target Cohort**: 50,000 accounts (₹60.0 Cr addressable exposure).
 * **Expected Lift & Recovery**: +3.50% lift $\implies$ **₹2.10 Crore** gross incremental collections.
-* **Pilot Net Economics**: **+₹0.10 Crore** Net Benefit (+5.0% 6-month ROI; break-even in **5.7 months**).
+* **Pilot Net Economics**: **+₹0.10 Crore** Net Benefit (+5.0% 6-month ROI; break-even in **5.3 months**).
 * **Stage-Gate Rule**: Do not release the remaining ₹8.0 Cr unless Month 6 DiD confirms a causal lift $\ge 2.50\text{ pp}$ ($p < 0.05$) and verified incremental recovery $\ge ₹2.10\text{ Cr}$.

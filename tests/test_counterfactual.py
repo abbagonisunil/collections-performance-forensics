@@ -101,3 +101,50 @@ def test_counterfactual_estimation_on_synthetic_panel():
     assert abs(res["counterfactual_baseline_recovery_inr"] - 30000.0) < 1.0
     # Incremental causal recovery = 37500 - 30000 = ₹7,500
     assert abs(res["incremental_recovery_inr"] - 7500.0) < 1.0
+
+
+def test_missing_targeting_history_returns_identification_not_supported():
+    """Verifies that if accounts exist but targeting exposure history is unpopulated,
+    the analyzer explicitly returns IDENTIFICATION_NOT_SUPPORTED rather than guessing.
+    """
+    con = duckdb.connect(":memory:")
+    con.execute("""
+        CREATE TABLE dim_account (account_id VARCHAR, due_date DATE, opening_principal DOUBLE);
+        CREATE TABLE clean_payments (account_id VARCHAR, amount_paid DOUBLE);
+        INSERT INTO dim_account VALUES ('A1', '2024-03-01', 1000.0), ('A2', '2024-08-01', 2000.0);
+    """)
+    cf = CounterfactualAnalyzer(con=con)
+    res = cf.estimate_difference_in_differences()
+
+    assert res["analysis_status"] == "IDENTIFICATION_NOT_SUPPORTED"
+    assert res["estimate"] is None
+    assert res["p_value"] is None
+    assert "Daily targeting history" in res["limitations"][0]
+
+
+def test_single_pre_period_reports_parallel_trends_limitation():
+    """Verifies that when only 1 pre-period cohort exists, the analyzer reports
+    that formal parallel pre-trends test requires >= 2 pre-periods.
+    """
+    con = duckdb.connect(":memory:")
+    con.execute("""
+        CREATE TABLE dim_account (account_id VARCHAR, due_date DATE, opening_principal DOUBLE);
+        CREATE TABLE clean_payments (account_id VARCHAR, amount_paid DOUBLE);
+        CREATE TABLE features_account_level (account_id VARCHAR, targeted_in_post_period INTEGER);
+    """)
+    # 20 accounts across 1 pre-month and 1 post-month
+    for i in range(10):
+        con.execute(f"INSERT INTO dim_account VALUES ('C_PRE_{i}', '2024-04-01', 5000.0);")
+        con.execute(f"INSERT INTO features_account_level VALUES ('C_PRE_{i}', 0);")
+        con.execute(f"INSERT INTO dim_account VALUES ('C_POST_{i}', '2024-09-01', 5000.0);")
+        con.execute(f"INSERT INTO features_account_level VALUES ('C_POST_{i}', 0);")
+        con.execute(f"INSERT INTO dim_account VALUES ('T_PRE_{i}', '2024-04-01', 5000.0);")
+        con.execute(f"INSERT INTO features_account_level VALUES ('T_PRE_{i}', 1);")
+        con.execute(f"INSERT INTO dim_account VALUES ('T_POST_{i}', '2024-09-01', 5000.0);")
+        con.execute(f"INSERT INTO features_account_level VALUES ('T_POST_{i}', 1);")
+
+    cf = CounterfactualAnalyzer(con=con)
+    res = cf.estimate_difference_in_differences()
+
+    assert res["analysis_status"] == "COMPUTED_FROM_DATA"
+    assert "requires >= 2 pre-periods" in res["pre_treatment_trend_result"]
